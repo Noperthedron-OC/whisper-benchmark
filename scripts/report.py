@@ -247,7 +247,7 @@ function sortTable(col) {{
 // ── Diff viewer ───────────────────────────────────────────────────────────
 function wordDiff(ref, hyp) {{
   if (!ref || !hyp) return hyp || '<span class="null">—</span>';
-  const rw = ref.split(/[\s]+/), hw = hyp.split(/[\s]+/);
+  const rw = ref.split(/[\\s]+/), hw = hyp.split(/[\\s]+/);
   // Simple LCS-based diff
   const m = rw.length, n = hw.length;
   const dp = Array.from({{length: m+1}}, () => new Array(n+1).fill(0));
