@@ -22,6 +22,9 @@ API_BACKENDS = [
     {"key": "gpt-4o-transcribe","model": "gpt-4o-transcribe", "cost_per_min": 0.006},
 ]
 
+# Backend whose output is treated as ground truth for WER
+GROUND_TRUTH_BACKEND = "gpt-4o-transcribe"
+
 LOCAL_TIMEOUT = 300
 API_TIMEOUT = 120
 API_RETRY_DELAY = 5

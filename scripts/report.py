@@ -46,11 +46,12 @@ def build_report(metrics: dict) -> str:
     summary_row1 += stat_card(f"${total_cost:.4f}", "Total API cost", "")
 
     summary_row2 = ""
+    gt = agg.get("ground_truth_key", "gpt-4o-transcribe")
     if agg.get("local_wer", {}).get("n"):
-        summary_row2 += stat_card(agg["local_wer"]["mean"], f"Local WER vs iOS (n={agg['local_wer']['n']})", "local")
+        summary_row2 += stat_card(agg["local_wer"]["mean"], f"Local WER vs {gt} (n={agg['local_wer']['n']})", "local")
     for k in backend_keys:
-        if agg.get(f"{k}_wer", {}).get("n"):
-            summary_row2 += stat_card(agg[f"{k}_wer"]["mean"], f"{k} WER vs iOS", k)
+        if k != gt and agg.get(f"{k}_wer", {}).get("n"):
+            summary_row2 += stat_card(agg[f"{k}_wer"]["mean"], f"{k} WER vs {gt}", k)
 
     # Table header columns
     def th(label, idx):
@@ -210,16 +211,19 @@ function sortTable(col) {{
 }}
 
 // ── Diff viewer ───────────────────────────────────────────────────────────
+function normWord(w) {{
+  return w.toLowerCase().replace(/[^\\w]/g, '');
+}}
 function wordDiff(ref, hyp) {{
   if(!ref||!hyp) return hyp||'<span class="null">—</span>';
   const rw=ref.split(/[\\s]+/),hw=hyp.split(/[\\s]+/);
   const m=rw.length,n=hw.length;
   const dp=Array.from({{length:m+1}},()=>new Array(n+1).fill(0));
   for(let i=1;i<=m;i++) for(let j=1;j<=n;j++)
-    dp[i][j]=rw[i-1].toLowerCase()===hw[j-1].toLowerCase()?dp[i-1][j-1]+1:Math.max(dp[i-1][j],dp[i][j-1]);
+    dp[i][j]=normWord(rw[i-1])===normWord(hw[j-1])?dp[i-1][j-1]+1:Math.max(dp[i-1][j],dp[i][j-1]);
   const ops=[];let i=m,j=n;
   while(i>0||j>0){{
-    if(i>0&&j>0&&rw[i-1].toLowerCase()===hw[j-1].toLowerCase()){{ops.push(['eq',hw[j-1]]);i--;j--;}}
+    if(i>0&&j>0&&normWord(rw[i-1])===normWord(hw[j-1])){{ops.push(['eq',hw[j-1]]);i--;j--;}}
     else if(j>0&&(i===0||dp[i][j-1]>=dp[i-1][j])){{ops.push(['ins',hw[j-1]]);j--;}}
     else{{ops.push(['del',rw[i-1]]);i--;}}
   }}
@@ -233,18 +237,19 @@ function selectRow(tr) {{
   const stem=tr.querySelector('td').textContent;
   const rec=pf.find(x=>x.stem===stem)||filteredData[+tr.dataset.i];
   document.getElementById('diffTitle').textContent=`Transcript comparison — ${{rec.stem}}`;
-  const ref=rec.ios_text||rec[backendKeys[0]+'_text']||'';
+  const gtKey=agg.ground_truth_key;
+  const ref=rec[gtKey+'_text']||'';
   const panels=[
-    {{label:'iOS',key:'ios',text:rec.ios_text,color:'#f59e0b'}},
+    {{label:gtKey+' (reference)',key:gtKey,text:rec[gtKey+'_text'],color:'#f59e0b',isRef:true}},
     {{label:'Local',key:'local',text:rec.local_text,color:'#34d399'}},
-    ...backendKeys.map((k,i)=>{{return{{label:k,key:k,text:rec[k+'_text'],color:colorsLine[i+1]}}}})
+    ...backendKeys.filter(k=>k!==gtKey).map((k,i)=>{{return{{label:k,key:k,text:rec[k+'_text'],color:colorsLine[i+2]}}}})
   ];
   const grid=document.getElementById('diffGrid');
   grid.style.gridTemplateColumns=`repeat(${{panels.length}},1fr)`;
   grid.innerHTML=panels.map(p=>`
     <div class="card">
       <h3 style="color:${{p.color}}">${{p.label}}</h3>
-      <div class="diff-text">${{p.key==='ios'?(p.text||'<span class="null">No iOS reference</span>'):wordDiff(ref,p.text)}}</div>
+      <div class="diff-text">${{p.isRef?(p.text||'<span class="null">No reference</span>'):wordDiff(ref,p.text)}}</div>
     </div>`).join('');
   document.getElementById('diffPanel').classList.add('visible');
   document.getElementById('diffPanel').scrollIntoView({{behavior:'smooth',block:'nearest'}});
