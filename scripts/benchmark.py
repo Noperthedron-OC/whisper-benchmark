@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Run both local whisper.cpp and OpenAI Whisper API on the corpus.
-Saves per-file JSON to results/raw/local/ and results/raw/api/.
+Run local whisper.cpp and one or more OpenAI API backends on the corpus.
+Saves per-file JSON to results/raw/<backend_key>/.
 Idempotent: skips files already processed.
 """
 
@@ -49,13 +49,13 @@ def transcribe_local(m4a: Path) -> tuple[str, float]:
         wav.unlink(missing_ok=True)
 
 
-def transcribe_api(m4a: Path) -> tuple[str, float]:
+def transcribe_api(m4a: Path, model: str) -> tuple[str, float]:
     from openai import OpenAI
     client = OpenAI(api_key=config.OPENAI_API_KEY)
     t0 = time.perf_counter()
     with open(m4a, "rb") as f:
         response = client.audio.transcriptions.create(
-            model=config.OPENAI_MODEL,
+            model=model,
             file=f,
             response_format="text",
         )
@@ -97,12 +97,13 @@ def run_local(entries: list[dict], limit: int | None, dry_run: bool):
             tqdm.write(f"  ERROR {entry['stem']}: {e}")
 
 
-def run_api(entries: list[dict], limit: int | None, dry_run: bool):
-    config.RAW_API_DIR.mkdir(parents=True, exist_ok=True)
-    todo = [e for e in entries if not (config.RAW_API_DIR / f"{e['stem']}.json").exists()]
+def run_api_backend(entries: list[dict], backend: dict, limit: int | None, dry_run: bool):
+    out_dir = config.RESULTS_DIR / "raw" / backend["key"]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    todo = [e for e in entries if not (out_dir / f"{e['stem']}.json").exists()]
     if limit:
         todo = todo[:limit]
-    print(f"\n[API]   {len(todo)} files to transcribe")
+    print(f"\n[{backend['key']}] {len(todo)} files to transcribe")
     for entry in tqdm(todo, unit="file"):
         if dry_run:
             print(f"  DRY: {entry['stem']}")
@@ -110,11 +111,11 @@ def run_api(entries: list[dict], limit: int | None, dry_run: bool):
         for attempt in range(2):
             try:
                 duration = get_duration(entry["m4a"])
-                text, elapsed = transcribe_api(entry["m4a"])
-                cost = round(duration / 60 * config.OPENAI_COST_PER_MINUTE, 6)
+                text, elapsed = transcribe_api(entry["m4a"], backend["model"])
+                cost = round(duration / 60 * backend["cost_per_min"], 6)
                 out = {"stem": entry["stem"], "text": text, "time_s": round(elapsed, 3),
                        "duration_s": round(duration, 3), "cost_usd": cost}
-                (config.RAW_API_DIR / f"{entry['stem']}.json").write_text(json.dumps(out, indent=2))
+                (out_dir / f"{entry['stem']}.json").write_text(json.dumps(out, indent=2))
                 break
             except Exception as e:
                 if attempt == 0:
@@ -128,18 +129,26 @@ def main():
     parser = argparse.ArgumentParser(description="Whisper benchmark runner")
     parser.add_argument("--local-only", action="store_true")
     parser.add_argument("--api-only", action="store_true")
+    parser.add_argument("--backends", nargs="+",
+                        help="API backend keys to run (default: all). E.g. --backends whisper-1")
     parser.add_argument("--limit", type=int, default=None, metavar="N",
                         help="Process only first N files (for testing)")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     entries = load_corpus()
+    backends = config.API_BACKENDS
+    if args.backends:
+        backends = [b for b in backends if b["key"] in args.backends]
+
     print(f"Corpus: {len(entries)} files ({sum(1 for e in entries if e['ref'])} with iOS ref)")
+    print(f"API backends: {[b['key'] for b in backends]}")
 
     if not args.api_only:
         run_local(entries, args.limit, args.dry_run)
     if not args.local_only:
-        run_api(entries, args.limit, args.dry_run)
+        for backend in backends:
+            run_api_backend(entries, backend, args.limit, args.dry_run)
 
     print("\nDone. Run analyze.py next.")
 

@@ -18,7 +18,7 @@ import config
 def normalise(text: str) -> str:
     text = text.lower()
     text = re.sub(r"[-–—/]", " ", text)   # hyphens/dashes → space (preserves word boundaries)
-    text = re.sub(r"[^\w\s]", "", text)   # strip remaining punctuation
+    text = re.sub(r"[^\w\s]", "", text)   # strip all remaining punctuation incl. periods
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -43,40 +43,63 @@ def percentile(values: list[float], p: int) -> float:
 
 def load_results(directory: Path) -> dict[str, dict]:
     results = {}
+    if not directory.exists():
+        return results
     for f in directory.glob("*.json"):
         data = json.loads(f.read_text())
         results[data["stem"]] = data
     return results
 
 
+def agg_stats(values: list[float]) -> dict:
+    if not values:
+        return {}
+    return {
+        "mean": round(sum(values) / len(values), 4),
+        "median": percentile(values, 50),
+        "p95": percentile(values, 95),
+        "min": round(min(values), 4),
+        "max": round(max(values), 4),
+        "n": len(values),
+    }
+
+
 def main():
     local = load_results(config.RAW_LOCAL_DIR)
-    api = load_results(config.RAW_API_DIR)
 
-    if not local and not api:
+    # Load all API backends
+    api_results = {}  # key → {stem → data}
+    for backend in config.API_BACKENDS:
+        d = config.RESULTS_DIR / "raw" / backend["key"]
+        api_results[backend["key"]] = load_results(d)
+
+    all_stems = set(local.keys())
+    for res in api_results.values():
+        all_stems |= set(res.keys())
+    stems = sorted(all_stems)
+
+    if not stems:
         print("No results found. Run benchmark.py first.")
         sys.exit(1)
 
-    stems = sorted(set(local) | set(api))
-    print(f"Analyzing {len(stems)} files ({len(local)} local, {len(api)} API results)")
+    backend_keys = [b["key"] for b in config.API_BACKENDS if api_results.get(b["key"])]
+    print(f"Analyzing {len(stems)} files | local: {len(local)} | backends: {backend_keys}")
 
     per_file = []
     for stem in stems:
         l = local.get(stem)
-        a = api.get(stem)
-        duration = (l or a).get("duration_s", 0)
+        first_api = next((api_results[k].get(stem) for k in backend_keys if api_results[k].get(stem)), None)
+        duration = (l or first_api or {}).get("duration_s", 0)
 
-        # Load iOS reference if available
-        ref_path = config.CORPUS_DIR / f"{stem}.txt" if hasattr(config, "CORPUS_DIR") else None
-        ref_text = None
         corpus_ref = config.CORPUS_DIR / f"{stem}.txt"
-        if corpus_ref.exists():
-            ref_text = corpus_ref.read_text().strip()
+        ref_text = corpus_ref.read_text().strip() if corpus_ref.exists() else None
 
         row = {
             "stem": stem,
             "duration_s": duration,
             "has_ios_ref": ref_text is not None,
+            "ios_text": ref_text,
+            "local_text": l["text"] if l else None,
         }
 
         if l:
@@ -84,70 +107,57 @@ def main():
             row["local_rtf"] = round(l["time_s"] / duration, 4) if duration else None
             row["local_words"] = len(l["text"].split())
             row["local_wer"] = safe_wer(ref_text, l["text"]) if ref_text else None
-        if a:
-            row["api_time_s"] = a["time_s"]
-            row["api_rtf"] = round(a["time_s"] / duration, 4) if duration else None
-            row["api_words"] = len(a["text"].split())
-            row["api_wer"] = safe_wer(ref_text, a["text"]) if ref_text else None
-            row["api_cost_usd"] = a.get("cost_usd", round(duration / 60 * config.OPENAI_COST_PER_MINUTE, 6))
 
-        if l and a:
-            row["cross_wer"] = safe_wer(a["text"], l["text"])
-
-        # Store transcript snippets for diff viewer
-        row["local_text"] = l["text"] if l else None
-        row["api_text"] = a["text"] if a else None
-        row["ios_text"] = ref_text
+        for key in backend_keys:
+            a = api_results[key].get(stem)
+            row[f"{key}_text"] = a["text"] if a else None
+            if a:
+                row[f"{key}_time_s"] = a["time_s"]
+                row[f"{key}_rtf"] = round(a["time_s"] / duration, 4) if duration else None
+                row[f"{key}_words"] = len(a["text"].split())
+                row[f"{key}_wer"] = safe_wer(ref_text, a["text"]) if ref_text else None
+                row[f"{key}_cost_usd"] = a.get("cost_usd", 0)
+                if l:
+                    row[f"{key}_cross_wer"] = safe_wer(a["text"], l["text"])
 
         per_file.append(row)
 
-    # Aggregate stats
-    def agg(key: str) -> dict:
-        vals = [r[key] for r in per_file if r.get(key) is not None]
-        if not vals:
-            return {}
-        return {
-            "mean": round(sum(vals) / len(vals), 4),
-            "median": percentile(vals, 50),
-            "p95": percentile(vals, 95),
-            "min": round(min(vals), 4),
-            "max": round(max(vals), 4),
-            "n": len(vals),
-        }
-
+    # Aggregate
     aggregate = {
         "total_files": len(per_file),
         "files_with_ios_ref": sum(1 for r in per_file if r["has_ios_ref"]),
         "total_duration_min": round(sum(r["duration_s"] for r in per_file) / 60, 2),
-        "total_api_cost_usd": round(sum(r.get("api_cost_usd", 0) for r in per_file), 4),
-        "local_rtf": agg("local_rtf"),
-        "api_rtf": agg("api_rtf"),
-        "local_wer": agg("local_wer"),
-        "api_wer": agg("api_wer"),
-        "cross_wer": agg("cross_wer"),
-        "local_time_s": agg("local_time_s"),
-        "api_time_s": agg("api_time_s"),
+        "backend_keys": backend_keys,
+        "local_rtf": agg_stats([r["local_rtf"] for r in per_file if r.get("local_rtf")]),
+        "local_wer": agg_stats([r["local_wer"] for r in per_file if r.get("local_wer") is not None]),
     }
+    for key in backend_keys:
+        aggregate[f"{key}_rtf"] = agg_stats([r[f"{key}_rtf"] for r in per_file if r.get(f"{key}_rtf")])
+        aggregate[f"{key}_wer"] = agg_stats([r[f"{key}_wer"] for r in per_file if r.get(f"{key}_wer") is not None])
+        aggregate[f"{key}_cross_wer"] = agg_stats([r[f"{key}_cross_wer"] for r in per_file if r.get(f"{key}_cross_wer") is not None])
+        aggregate[f"{key}_total_cost"] = round(sum(r.get(f"{key}_cost_usd", 0) for r in per_file), 4)
 
     metrics = {"per_file": per_file, "aggregate": aggregate}
     config.METRICS_FILE.write_text(json.dumps(metrics, indent=2, ensure_ascii=False))
 
-    print(f"\n{'='*50}")
+    print(f"\n{'='*55}")
     print(f"Total audio:    {aggregate['total_duration_min']:.1f} min")
-    print(f"API cost:       ${aggregate['total_api_cost_usd']:.4f}")
+    for key in backend_keys:
+        print(f"API cost [{key}]: ${aggregate[f'{key}_total_cost']:.4f}")
     if aggregate["local_rtf"]:
-        print(f"Local RTF:      {aggregate['local_rtf']['mean']:.3f} (mean) | {aggregate['local_rtf']['p95']:.3f} (p95)")
-    if aggregate["api_rtf"]:
-        print(f"API RTF:        {aggregate['api_rtf']['mean']:.3f} (mean) | {aggregate['api_rtf']['p95']:.3f} (p95)")
+        print(f"Local RTF:      {aggregate['local_rtf']['mean']:.3f} mean | {aggregate['local_rtf']['p95']:.3f} p95")
+    for key in backend_keys:
+        s = aggregate[f"{key}_rtf"]
+        if s:
+            print(f"{key} RTF:  {s['mean']:.3f} mean | {s['p95']:.3f} p95")
     if aggregate["local_wer"].get("n"):
-        print(f"Local WER:      {aggregate['local_wer']['mean']:.3f} (mean, n={aggregate['local_wer']['n']})")
-    if aggregate["api_wer"].get("n"):
-        print(f"API WER:        {aggregate['api_wer']['mean']:.3f} (mean, n={aggregate['api_wer']['n']})")
-    if aggregate["cross_wer"].get("n"):
-        print(f"Cross-WER:      {aggregate['cross_wer']['mean']:.3f} (mean)")
-    print(f"{'='*50}")
-    print(f"\nSaved to {config.METRICS_FILE}")
-    print("Run report.py next.")
+        print(f"Local WER:      {aggregate['local_wer']['mean']:.3f} (n={aggregate['local_wer']['n']})")
+    for key in backend_keys:
+        s = aggregate[f"{key}_wer"]
+        if s.get("n"):
+            print(f"{key} WER:  {s['mean']:.3f} (n={s['n']})")
+    print(f"{'='*55}")
+    print(f"\nSaved → {config.METRICS_FILE}\nRun report.py next.")
 
 
 if __name__ == "__main__":

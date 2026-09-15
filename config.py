@@ -15,8 +15,12 @@ WHISPER_MODEL = "/home/mimir/opt/whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin
 WHISPER_FLAGS = ["--language", "auto", "--no-timestamps", "--no-prints"]
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_MODEL = "whisper-1"
-OPENAI_COST_PER_MINUTE = 0.006
+
+# API backends to benchmark — each gets its own results/raw/<key>/ directory
+API_BACKENDS = [
+    {"key": "whisper-1",        "model": "whisper-1",         "cost_per_min": 0.006},
+    {"key": "gpt-4o-transcribe","model": "gpt-4o-transcribe", "cost_per_min": 0.006},
+]
 
 LOCAL_TIMEOUT = 300
 API_TIMEOUT = 120
