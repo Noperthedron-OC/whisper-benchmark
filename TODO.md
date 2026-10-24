@@ -1,16 +1,22 @@
 # Whisper Benchmark — TODO
 
-## Backlog
-
-- [ ] Phase 1: git init, requirements.txt, config.py, corpus.txt
-- [ ] Phase 2: scripts/benchmark.py (runner)
-- [ ] Phase 3: scripts/analyze.py (metrics)
-- [ ] Phase 4: scripts/report.py (HTML report)
-- [ ] Phase 5: smoke test (--limit 3)
-- [ ] Phase 6: full benchmark run (all 44 files)
-- [ ] Phase 7: GitHub setup (needs Erich to pick an option — see notes/plan.md)
-
-## GitHub options (waiting on Erich)
-See `notes/plan.md` Phase 7 for the three options.
-
 ## Done
+
+- [x] Project setup: `config.py`, `requirements.txt`, corpus list (local only, see `data/corpus.example.txt`)
+- [x] `scripts/benchmark.py`: runner for local whisper.cpp and the OpenAI backends (whisper-1, gpt-4o-transcribe)
+- [x] `scripts/analyze.py`: RTF, WER vs reference, cost
+- [x] `scripts/report.py`: HTML report with charts and table; `--public` writes a numbers-only version
+- [x] Smoke test and full run (44 recordings, 84.8 min)
+- [x] GitHub repository set up
+- [x] Review of the analysis (24 Oct 2026): equal averaging, true median, empty transcripts count as WER 1.0, nearly empty recordings excluded (`MIN_REFERENCE_WORDS`), dead cross-WER column removed
+- [x] Re-run, README with results, public report
+- [x] Private data (transcripts, metrics, corpus list) removed from the repository and its history, now ignored
+- [x] Repository made public (24 Oct 2026)
+
+## Ideas (not planned)
+
+- Repeat the timing runs to measure variation between runs (every file was run once per system).
+- Test the local model on a GPU, and with a model that stays loaded between files.
+- Check the repetition problem of the local model more closely (decoding settings, e.g. temperature fallback or no-speech threshold).
+- Use a human-corrected transcript for a subset, so WER does not only measure agreement with `gpt-4o-transcribe`.
+- Publish the public report as a web page.
