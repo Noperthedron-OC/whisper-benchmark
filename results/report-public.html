@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Whisper Benchmark Report</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:#0f1117;--card:#1a1d27;--border:#2a2d3d;
+    --text:#e2e8f0;--muted:#94a3b8;--accent:#6366f1;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;font-size:14px;line-height:1.6}
+  .container{max-width:1400px;margin:0 auto;padding:24px}
+  h1{font-size:1.5rem;font-weight:700;margin-bottom:4px}
+  h2{font-size:1rem;font-weight:600;color:var(--muted);margin-bottom:16px}
+  h3{font-size:.85rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px}
+  .grid{display:grid;gap:16px}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  @media(max-width:900px){.g4,.g3,.g2{grid-template-columns:1fr 1fr}}
+  @media(max-width:500px){.g4,.g3,.g2{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px}
+  .stat-value{font-size:2rem;font-weight:700;line-height:1}
+  .stat-label{color:var(--muted);font-size:.8rem;margin-top:4px}
+  table{width:100%;border-collapse:collapse;font-size:.82rem}
+  th{padding:8px 10px;text-align:left;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border);cursor:pointer;user-select:none;white-space:nowrap}
+  th:hover{color:var(--text)}
+  td{padding:7px 10px;border-bottom:1px solid #1f2233;vertical-align:top}
+  tr{cursor:pointer;transition:background .1s}
+  tr:hover{background:#1f2233}
+  tr.active{background:#23273a}
+  .null{color:var(--muted)}
+  .diff-panel{display:none;margin-top:16px}
+  .diff-panel.visible{display:block}
+  .diff-text{font-size:.85rem;line-height:1.8}
+  mark.ins{background:#14532d;color:#86efac;border-radius:3px;padding:0 2px}
+  mark.del{background:transparent;color:#6b7280;text-decoration:line-through;padding:0 2px}
+  canvas{max-height:280px}
+  .sec{margin:28px 0 12px;font-size:1rem;font-weight:600}
+  .filter-bar{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
+  input[type=text]{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 12px;font-size:.85rem;flex:1;min-width:180px}
+  input[type=text]:focus{outline:none;border-color:var(--accent)}
+  .wbar{display:inline-block;height:8px;border-radius:4px;vertical-align:middle;margin-left:4px;opacity:.5}
+  .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.75rem;font-weight:600;margin-right:4px}
+  details.about{margin-bottom:20px;line-height:1.65}
+  details.about summary{cursor:pointer;font-weight:600;font-size:1rem}
+  details.about h3{margin:18px 0 6px}
+  details.about p,details.about ul,details.about dl{margin:6px 0}
+  details.about ul{padding-left:20px}
+  details.about li{margin:4px 0}
+  details.about dt{font-weight:600;margin-top:8px}
+  details.about dd{margin-left:18px;color:var(--muted)}
+  table.mini{width:auto;margin:8px 0}
+  table.mini th,table.mini td{cursor:default}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🎙 Whisper Benchmark</h1>
+  <h2>44 recordings &nbsp;·&nbsp; 84.8 min audio &nbsp;·&nbsp; backends: local + whisper-1, gpt-4o-transcribe</h2>
+
+  
+<div class="card" style="margin-bottom:20px">
+  <h3>Summary</h3>
+  <p style="margin-bottom:8px">Three speech-to-text systems transcribed the same 44 voice recordings
+  (85 minutes). Speed, cost and agreement with a reference were compared.</p>
+  <ul style="padding-left:20px;line-height:1.7">
+    <li><b>Speed:</b> gpt-4o-transcribe took 2.5 minutes in total, the local model 48 minutes, about
+        20 times longer. The local model ran on the processor only.</li>
+    <li><b>Cost:</b> $0.51 for the whole corpus with either online model ($0.006 per minute); local costs nothing per file.</li>
+    <li><b>Agreement with the reference (gpt-4o-transcribe), error rate over all files:</b> local: mean 0.199, median 0.093; whisper-1: mean 0.204, median 0.055. Averages are close,
+        the online whisper-1 is better at the median. The two cards further down use a different file selection
+        and are not directly comparable (see the explanation).</li>
+    <li><b>Where local is weaker:</b> long recordings (3 minutes and more) and repetitions: words or whole phrases
+        are repeated, 15 times in 9 files, sometimes several times in a row.</li>
+    <li><b>Caution:</b> the reference is itself a machine transcription, so the error rates show agreement, not
+        truth. A few nearly empty recordings distort the means, and only 44 files from one speaker were used.</li>
+  </ul>
+</div>
+
+  
+<details class="card about" open>
+  <summary>About this report &mdash; what was measured, how, and what the abbreviations mean</summary>
+
+  <h3>What was done</h3>
+  <p>The same 44 voice recordings (85 minutes in total, natural
+  speech, mixed German and English, recorded on a phone) were transcribed by three speech-to-text systems.
+  Speed, cost and agreement between the systems were measured. The goal: is it worth paying for an online
+  service, or is a model that runs on the home server good and fast enough?</p>
+
+  <h3>The three systems</h3>
+  <ul>
+    <li><b>local</b> &mdash; <i>whisper.cpp</i> with the model <i>large-v3-turbo</i> (compressed to 5 bit,
+        &ldquo;q5_0&rdquo;), running on the server&rsquo;s processor (CPU), no graphics card. Language is
+        detected automatically. Nothing leaves the machine.</li>
+    <li><b>whisper-1</b> &mdash; OpenAI&rsquo;s online transcription service with the classic Whisper model.</li>
+    <li><b>gpt-4o-transcribe</b> &mdash; OpenAI&rsquo;s newer, GPT-4o based online transcription model.
+        Both online services cost $0.006 per audio minute.</li>
+  </ul>
+
+  <h3>How it was measured</h3>
+  <ul>
+    <li><b>Time:</b> stopwatch around the transcription call. Local: only the run of the program
+        (including loading the model each time); the preceding conversion of the audio to a 16 kHz WAV file
+        is <i>not</i> counted. Online: from sending the request (including upload of the audio file) until the text
+        is back. Files were processed one after the other, once each.</li>
+    <li><b>Reference:</b> there is no human-written transcript. <b>gpt-4o-transcribe</b> serves as the
+        reference, so its own error rate is 0 by definition. All error rates therefore measure
+        <i>agreement with gpt-4o-transcribe</i>, not absolute correctness. Both of the other systems
+        can be right where the reference is wrong.</li>
+    <li><b>Settings:</b> the online services received the original audio file with default settings (no language
+        given, no hint text, plain-text output). Local used automatic language detection and no time stamps.</li>
+  </ul>
+
+  <h3>How the comparison was performed</h3>
+  <ol>
+    <li><b>Pairing:</b> for each recording, the text of a system is compared with the reference text of the
+        same recording.</li>
+    <li><b>Cleaning (applied to both texts before comparing):</b> everything is made lowercase; hyphens, dashes and
+        slashes become spaces; all other punctuation is deleted (also apostrophes, so &ldquo;don&rsquo;t&rdquo;
+        becomes &ldquo;dont&rdquo;); repeated spaces and line breaks are collapsed. Letters with umlauts and
+        &szlig; as well as digits are kept.</li>
+    <li><b>Counting:</b> the cleaned texts are split into words and aligned by the minimum number of changes
+        (word-level edit distance, library <i>jiwer</i>). Each replaced, missing or extra word counts as one error,
+        no matter how small the difference is. WER = errors / words in the reference.</li>
+    <li><b>Per file, then average:</b> the WER is calculated per recording, and mean, median and p95 are taken
+        over the recordings. Every file counts equally, so a 2-second clip weighs as much as a 7-minute
+        recording, and short clips can swing the mean strongly (this is why the median is often more
+        informative). A file is skipped for WER if one of the two texts is empty after cleaning.</li>
+  </ol>
+  <p><b>Ignored (does not count as an error):</b> upper/lower case, punctuation, line breaks and paragraph
+  layout, hyphen or slash versus space.</p>
+  <p><b>Not ignored (counts as an error):</b> different spelling of the same word (for example &ldquo;Handynummer&rdquo; versus
+  &ldquo;Handy-Nummer&rdquo; or &ldquo;Handy Nummer&rdquo; is an error, because one word becomes two; &ldquo;Handy-Nummer&rdquo;
+  versus &ldquo;Handy Nummer&rdquo; is not),
+  digits versus spelled-out numbers (&ldquo;2&rdquo; versus &ldquo;zwei&rdquo;), filler words
+  (&ldquo;&auml;h&rdquo;, &ldquo;um&rdquo;), contractions, names, wrong language, and every word the
+  reference has and the other text does not (or the other way round).</p>
+  <p><b>Not taken into account at all:</b> whether a mistake changes the meaning (a harmless slip counts the same as
+  a serious one), whether the reference itself is correct, punctuation and formatting quality, speaker or time
+  information, audio quality, memory use and electricity of the local model, and variation between repeated runs
+  (every file was run only once per system). Apple&rsquo;s own automatic transcripts of the recordings were
+  considered at first and then dropped as unreliable.</p>
+  <p><b>Highlighting in the full report</b> (not in this public version) uses its own simpler comparison in the browser
+  (lowercase, plain letters only) and is only for display. It does not influence any number here.</p>
+
+  <h3>Abbreviations and terms</h3>
+  <dl>
+    <dt>RTF &mdash; real-time factor</dt>
+    <dd>Transcription time divided by audio duration. 0.05 means a 10-minute recording took 30 seconds.
+        1.0 is exactly real time, above 1.0 is slower than the recording itself. Lower is better.</dd>
+    <dt>WER &mdash; word error rate</dt>
+    <dd>(S + D + I) / N: the number of replaced (substitutions), missing (deletions) and extra (insertions)
+        words, divided by the number of words N in the reference. 0 = identical, 0.10 = about one word in ten
+        differs. Values above 1 are possible if there are more errors than reference words. Lower is better.</dd>
+    <dt>Mean / median / p95</dt>
+    <dd>Average; the middle value (half of the files are better, half worse; less sensitive to outliers); and the
+        value that 95% of the files stay below, i.e. the bad end.</dd>
+    <dt>n</dt><dd>Number of files in a calculation.</dd>
+    <dt>Cost</dt><dd>Audio minutes &times; $0.006, in US dollars. Local costs nothing per file.</dd>
+    <dt>Time</dt><dd>Seconds for one file. <b>Duration</b> is the length of the recording.</dd>
+    <dt>Rec 01 &hellip;</dt><dd>Anonymous number of a recording (in chronological order).</dd>
+    <dt>CPU / GPU</dt><dd>Normal processor / graphics processor. Speech models run much faster on a GPU.</dd>
+    <dt>API</dt><dd>Interface to an online service.</dd>
+    <dt>cross-WER</dt><dd>Column reserved for the agreement between local and an online system. It was not
+        calculated in this run and therefore shows &mdash;.</dd>
+  </dl>
+
+  <h3>Reading the charts and the table</h3>
+  <ul>
+    <li><b>Speed (scatter):</b> every dot is a file. The higher a system&rsquo;s dots sit, the longer it took
+        for the same duration.</li>
+    <li><b>RTF per file (bars):</b> the same in relative terms. Bars above 1 mean slower than real time.</li>
+    <li><b>WER distribution:</b> how many files fall into each error band. Many files on the left (0&ndash;10%) is good.</li>
+    <li><b>Table:</b> click a column header to sort. The filter box searches the file name. Colours: green &lt; 20%,
+        yellow &lt; 40%, red above.</li>
+  </ul>
+
+  <h3>How to read the results (and two caveats)</h3>
+  <ul>
+    <li><b>Speed:</b> the online services are far faster than local on this server. The local model usually needs
+        more than half the recording length, the online services a few percent of it.</li>
+    <li><b>Error rate, like for like (all files, computed for this page):</b>
+      <table class="mini"><thead><tr><th>system</th><th>mean WER</th><th>median WER</th><th>files with WER = 0</th></tr></thead>
+      <tbody><tr><td>local</td><td>0.199</td><td>0.093</td><td>8 of 44</td></tr><tr><td>whisper-1</td><td>0.204</td><td>0.055</td><td>10 of 44</td></tr></tbody></table>
+      The two cards at the top show means that are <b>not</b> directly comparable: for the online
+      systems, files with a perfect score (0) were left out of the average, for local they were counted
+      (see the <i>n</i> in the card labels). On a like-for-like basis the two are about equal on average,
+      and the online model is better at the median.</li>
+    <li><b>Outliers:</b> the mean RTF of the local system is pulled up by a very short recording (under 2 seconds) whose
+        transcription took more than 20 seconds (probably start-up overhead). The median RTF is the better figure.</li>
+    <li><b>Limits:</b> one speaker, 44 files, one run, one server. The reference is itself a
+        machine transcription.</li>
+  </ul>
+  
+  <h3>Observations</h3>
+  <ol>
+    <li><b>Speed is the clear difference.</b> For 85 minutes of audio, gpt-4o-transcribe needed
+        2.5 minutes in total, local 48 minutes: local was about 20 times slower
+        (by mean RTF the gap is larger still). gpt-4o-transcribe is also slightly faster than whisper-1.
+        Local was slower than real time (RTF above 1) on 8 of 44 files.</li>
+    <li><b>Local speed depends on file length.</b> Short files carry a fixed cost, because the model is loaded
+        for every call (this is a likely explanation, not measured separately). Median local RTF falls from
+        0.93 for files under a minute to 0.48 for files of 3 minutes and more.
+        The online services are fast at every length.</li>
+    <li><b>Cost is a non-issue at this volume.</b> Both online models charge $0.006 per minute: $0.51 for
+        the whole corpus. 30 hours of voice notes per month would be about $10.80. Local costs nothing per
+        file, but occupied the server&rsquo;s processor for 48 minutes for this corpus.</li>
+    <li><b>Accuracy: close on average, but different by recording length.</b> Against the reference, local and
+        whisper-1 have similar mean error rates (see the table above). By recording length the picture differs;
+        in this run, local was clearly further from the reference on the longest recordings:
+      <table class="mini"><thead><tr><th>recording length</th><th>files</th><th>local mean</th><th>local median</th><th>whisper-1 mean</th><th>whisper-1 median</th></tr></thead>
+      <tbody><tr><td>under 1 min</td><td>21</td><td>0.283</td><td>0.075</td><td>0.312</td><td>0.062</td></tr><tr><td>1 to 3 min</td><td>14</td><td>0.091</td><td>0.082</td><td>0.141</td><td>0.061</td></tr><tr><td>3 min and longer</td><td>9</td><td>0.172</td><td>0.175</td><td>0.050</td><td>0.049</td></tr></tbody></table>
+      With only a handful of files per band this is an indication, not proof.</li>
+    <li><b>A few nearly empty recordings distort the error rates.</b> 4 of the 44 recordings
+        have fewer than 10 words in the reference (very little speech). One word more or less is then
+        a 10&ndash;100% error, and these files account for most WER values of 1.0 and above. Without them:
+      <table class="mini"><thead><tr><th>system</th><th>mean WER, all files</th><th>mean WER, without those files</th>
+      <th>median WER, without those files</th></tr></thead><tbody><tr><td>local</td><td>0.199</td><td>0.094</td><td>0.086</td></tr><tr><td>whisper-1</td><td>0.204</td><td>0.099</td><td>0.046</td></tr></tbody></table></li>
+    <li><b>The local model sometimes repeats words or whole phrases.</b> A word or phrase directly followed
+        by itself occurs 15 times in the local transcripts, spread over 9 files
+        (whisper-1: 5 in 4 files; gpt-4o-transcribe: 0 in 0 files). 11 of the local cases are phrases of two or more words, and
+        12 repeat a unit that ends a clause or sentence, i.e. the end of a sentence is said
+        again, in some cases three or four times in a row before the text moves on. 6 of the
+        9 affected files are longer than 3 minutes. That looks like the known &ldquo;repetition loop&rdquo;
+        of Whisper-type models. Some repeats are real speech (stuttering, a list of names, &ldquo;like like&rdquo;), so not
+        every case is an error. Every wrongly repeated passage adds insertions and thus raises the WER of the local
+        model; the reference text has no such passages.</li>
+  </ol>
+
+  <p><b>Privacy:</b> This public version contains numbers only. All transcripts and the recording names (which contained date and time) were removed. Files are numbered <i>Rec 01 &hellip; Rec 44</i>. The side-by-side transcript viewer of the full report is not included.</p>
+</details>
+
+
+  <div class="grid g4" style="margin-bottom:16px"><div class="card"><div class="stat-value" style="color:#34d399">1.0671</div><div class="stat-label">Local mean RTF</div></div><div class="card"><div class="stat-value" style="color:#60a5fa">0.0612</div><div class="stat-label">whisper-1 mean RTF</div></div><div class="card"><div class="stat-value" style="color:#f472b6">0.0427</div><div class="stat-label">gpt-4o-transcribe mean RTF</div></div><div class="card"><div class="stat-value" style="color:var(--text)">$1.0180</div><div class="stat-label">Total API cost</div></div></div>
+  <div class="grid g3" style="margin-bottom:20px"><div class="card"><div class="stat-value" style="color:#34d399">0.1993</div><div class="stat-label">Local WER vs gpt-4o-transcribe (n=44)</div></div><div class="card"><div class="stat-value" style="color:#60a5fa">0.2639</div><div class="stat-label">whisper-1 WER vs gpt-4o-transcribe (n=34, perfect files excluded)</div></div></div>
+
+  <div class="grid g2" style="margin-bottom:20px">
+    <div class="card"><h3>Speed — Duration vs Transcription Time</h3><canvas id="speedChart"></canvas></div>
+    <div class="card"><h3>Real-Time Factor per File</h3><canvas id="rtfChart"></canvas></div>
+  </div>
+
+  <div class="card" style="margin-bottom:20px"><h3>WER Distribution vs gpt-4o-transcribe Reference</h3><canvas id="werChart"></canvas></div>
+
+  <p class="sec">Per-file results <span style="color:var(--muted);font-weight:400;font-size:.85em">— transcripts and recording names removed from this public version</span></p>
+  <div class="filter-bar"><input type="text" id="fi" placeholder="Filter by filename…" oninput="filterTable()"></div>
+  <div class="card" style="overflow-x:auto;margin-bottom:16px">
+    <table id="rt"><thead><tr><th onclick="sortTable(0)">File ↕</th><th onclick="sortTable(1)">Duration ↕</th><th onclick="sortTable(2)">Local time ↕</th><th onclick="sortTable(3)">Local RTF ↕</th><th onclick="sortTable(4)">Local WER ↕</th><th onclick="sortTable(5)">whisper-1 time ↕</th><th onclick="sortTable(6)">whisper-1 RTF ↕</th><th onclick="sortTable(7)">whisper-1 WER ↕</th><th onclick="sortTable(8)">whisper-1 cross-WER ↕</th><th onclick="sortTable(9)">gpt-4o-transcribe time ↕</th><th onclick="sortTable(10)">gpt-4o-transcribe RTF ↕</th><th onclick="sortTable(11)">gpt-4o-transcribe WER ↕</th><th onclick="sortTable(12)">gpt-4o-transcribe cross-WER ↕</th><th onclick="sortTable(13)">Cost ↕</th></tr></thead><tbody id="tb"></tbody></table>
+  </div>
+
+  
+</div>
+
+<script>
+const DATA = {"per_file": [{"duration_s": 448.517, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 201.051, "local_rtf": 0.4483, "local_words": 548, "local_wer": 0.1748, "whisper-1_time_s": 14.742, "whisper-1_rtf": 0.0329, "whisper-1_words": 482, "whisper-1_cost_usd": 0.044852, "whisper-1_wer": 0.0549, "gpt-4o-transcribe_time_s": 13.981, "gpt-4o-transcribe_rtf": 0.0312, "gpt-4o-transcribe_words": 490, "gpt-4o-transcribe_cost_usd": 0.044852, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 01"}, {"duration_s": 34.04, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 35.747, "local_rtf": 1.0501, "local_words": 40, "local_wer": 0.1081, "whisper-1_time_s": 3.586, "whisper-1_rtf": 0.1053, "whisper-1_words": 38, "whisper-1_cost_usd": 0.003404, "whisper-1_wer": 0.1622, "gpt-4o-transcribe_time_s": 1.814, "gpt-4o-transcribe_rtf": 0.0533, "gpt-4o-transcribe_words": 37, "gpt-4o-transcribe_cost_usd": 0.003404, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 02"}, {"duration_s": 62.601, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 48.036, "local_rtf": 0.7673, "local_words": 59, "local_wer": 0.2157, "whisper-1_time_s": 2.655, "whisper-1_rtf": 0.0424, "whisper-1_words": 60, "whisper-1_cost_usd": 0.00626, "whisper-1_wer": 0.1961, "gpt-4o-transcribe_time_s": 2.293, "gpt-4o-transcribe_rtf": 0.0366, "gpt-4o-transcribe_words": 51, "gpt-4o-transcribe_cost_usd": 0.00626, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 03"}, {"duration_s": 272.834, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 135.414, "local_rtf": 0.4963, "local_words": 217, "local_wer": 0.0973, "whisper-1_time_s": 7.126, "whisper-1_rtf": 0.0261, "whisper-1_words": 224, "whisper-1_cost_usd": 0.027283, "whisper-1_wer": 0.0265, "gpt-4o-transcribe_time_s": 7.04, "gpt-4o-transcribe_rtf": 0.0258, "gpt-4o-transcribe_words": 226, "gpt-4o-transcribe_cost_usd": 0.027283, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 04"}, {"duration_s": 92.694, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 60.5, "local_rtf": 0.6527, "local_words": 92, "local_wer": 0.0769, "whisper-1_time_s": 6.225, "whisper-1_rtf": 0.0672, "whisper-1_words": 92, "whisper-1_cost_usd": 0.009269, "whisper-1_wer": 0.033, "gpt-4o-transcribe_time_s": 2.719, "gpt-4o-transcribe_rtf": 0.0293, "gpt-4o-transcribe_words": 91, "gpt-4o-transcribe_cost_usd": 0.009269, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 05"}, {"duration_s": 64.946, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 48.146, "local_rtf": 0.7413, "local_words": 75, "local_wer": 0.0563, "whisper-1_time_s": 2.946, "whisper-1_rtf": 0.0454, "whisper-1_words": 74, "whisper-1_cost_usd": 0.006495, "whisper-1_wer": 0.0423, "gpt-4o-transcribe_time_s": 2.212, "gpt-4o-transcribe_rtf": 0.0341, "gpt-4o-transcribe_words": 71, "gpt-4o-transcribe_cost_usd": 0.006495, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 06"}, {"duration_s": 38.777, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 35.963, "local_rtf": 0.9274, "local_words": 40, "local_wer": 0.075, "whisper-1_time_s": 1.791, "whisper-1_rtf": 0.0462, "whisper-1_words": 40, "whisper-1_cost_usd": 0.003878, "whisper-1_wer": 0.0, "gpt-4o-transcribe_time_s": 1.453, "gpt-4o-transcribe_rtf": 0.0375, "gpt-4o-transcribe_words": 40, "gpt-4o-transcribe_cost_usd": 0.003878, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 07"}, {"duration_s": 66.014, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 46.987, "local_rtf": 0.7118, "local_words": 29, "local_wer": 0.0333, "whisper-1_time_s": 9.207, "whisper-1_rtf": 0.1395, "whisper-1_words": 49, "whisper-1_cost_usd": 0.006601, "whisper-1_wer": 1.0667, "gpt-4o-transcribe_time_s": 1.584, "gpt-4o-transcribe_rtf": 0.024, "gpt-4o-transcribe_words": 30, "gpt-4o-transcribe_cost_usd": 0.006601, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 08"}, {"duration_s": 30.047, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 24.142, "local_rtf": 0.8035, "local_words": 38, "local_wer": 0.0256, "whisper-1_time_s": 2.433, "whisper-1_rtf": 0.081, "whisper-1_words": 47, "whisper-1_cost_usd": 0.003005, "whisper-1_wer": 0.3077, "gpt-4o-transcribe_time_s": 1.321, "gpt-4o-transcribe_rtf": 0.044, "gpt-4o-transcribe_words": 39, "gpt-4o-transcribe_cost_usd": 0.003005, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 09"}, {"duration_s": 24.706, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 23.784, "local_rtf": 0.9627, "local_words": 16, "local_wer": 0.0625, "whisper-1_time_s": 1.181, "whisper-1_rtf": 0.0478, "whisper-1_words": 26, "whisper-1_cost_usd": 0.002471, "whisper-1_wer": 0.625, "gpt-4o-transcribe_time_s": 1.185, "gpt-4o-transcribe_rtf": 0.048, "gpt-4o-transcribe_words": 16, "gpt-4o-transcribe_cost_usd": 0.002471, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 10"}, {"duration_s": 1.765, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 23.504, "local_rtf": 13.3167, "local_words": 1, "local_wer": 1.0, "whisper-1_time_s": 1.132, "whisper-1_rtf": 0.6414, "whisper-1_words": 1, "whisper-1_cost_usd": 0.000176, "whisper-1_wer": 1.0, "gpt-4o-transcribe_time_s": 0.604, "gpt-4o-transcribe_rtf": 0.3422, "gpt-4o-transcribe_words": 1, "gpt-4o-transcribe_cost_usd": 0.000176, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 11"}, {"duration_s": 26.726, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 23.715, "local_rtf": 0.8873, "local_words": 17, "local_wer": 0.0, "whisper-1_time_s": 1.976, "whisper-1_rtf": 0.0739, "whisper-1_words": 17, "whisper-1_cost_usd": 0.002673, "whisper-1_wer": 0.0, "gpt-4o-transcribe_time_s": 1.79, "gpt-4o-transcribe_rtf": 0.067, "gpt-4o-transcribe_words": 17, "gpt-4o-transcribe_cost_usd": 0.002673, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 12"}, {"duration_s": 12.19, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 23.331, "local_rtf": 1.9139, "local_words": 1, "local_wer": 1.0, "whisper-1_time_s": 0.679, "whisper-1_rtf": 0.0557, "whisper-1_words": 1, "whisper-1_cost_usd": 0.001219, "whisper-1_wer": 1.0, "gpt-4o-transcribe_time_s": 0.674, "gpt-4o-transcribe_rtf": 0.0553, "gpt-4o-transcribe_words": 1, "gpt-4o-transcribe_cost_usd": 0.001219, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 13"}, {"duration_s": 62.206, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 48.143, "local_rtf": 0.7739, "local_words": 75, "local_wer": 0.0541, "whisper-1_time_s": 2.701, "whisper-1_rtf": 0.0434, "whisper-1_words": 71, "whisper-1_cost_usd": 0.006221, "whisper-1_wer": 0.0676, "gpt-4o-transcribe_time_s": 3.517, "gpt-4o-transcribe_rtf": 0.0565, "gpt-4o-transcribe_words": 73, "gpt-4o-transcribe_cost_usd": 0.006221, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 14"}, {"duration_s": 50.689, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 35.896, "local_rtf": 0.7082, "local_words": 41, "local_wer": 0.1905, "whisper-1_time_s": 3.28, "whisper-1_rtf": 0.0647, "whisper-1_words": 41, "whisper-1_cost_usd": 0.005069, "whisper-1_wer": 0.1667, "gpt-4o-transcribe_time_s": 1.442, "gpt-4o-transcribe_rtf": 0.0284, "gpt-4o-transcribe_words": 42, "gpt-4o-transcribe_cost_usd": 0.005069, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 15"}, {"duration_s": 92.74, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 60.721, "local_rtf": 0.6547, "local_words": 105, "local_wer": 0.0926, "whisper-1_time_s": 3.057, "whisper-1_rtf": 0.033, "whisper-1_words": 108, "whisper-1_cost_usd": 0.009274, "whisper-1_wer": 0.0278, "gpt-4o-transcribe_time_s": 3.895, "gpt-4o-transcribe_rtf": 0.042, "gpt-4o-transcribe_words": 108, "gpt-4o-transcribe_cost_usd": 0.009274, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 16"}, {"duration_s": 50.364, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 36.059, "local_rtf": 0.716, "local_words": 45, "local_wer": 0.1429, "whisper-1_time_s": 2.908, "whisper-1_rtf": 0.0577, "whisper-1_words": 49, "whisper-1_cost_usd": 0.005036, "whisper-1_wer": 0.1429, "gpt-4o-transcribe_time_s": 1.795, "gpt-4o-transcribe_rtf": 0.0356, "gpt-4o-transcribe_words": 48, "gpt-4o-transcribe_cost_usd": 0.005036, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 17"}, {"duration_s": 40.821, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 34.879, "local_rtf": 0.8544, "local_words": 2, "local_wer": 2.0, "whisper-1_time_s": 0.893, "whisper-1_rtf": 0.0219, "whisper-1_words": 2, "whisper-1_cost_usd": 0.004082, "whisper-1_wer": 2.0, "gpt-4o-transcribe_time_s": 1.378, "gpt-4o-transcribe_rtf": 0.0338, "gpt-4o-transcribe_words": 1, "gpt-4o-transcribe_cost_usd": 0.004082, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 18"}, {"duration_s": 135.999, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 73.751, "local_rtf": 0.5423, "local_words": 154, "local_wer": 0.0321, "whisper-1_time_s": 6.664, "whisper-1_rtf": 0.049, "whisper-1_words": 153, "whisper-1_cost_usd": 0.0136, "whisper-1_wer": 0.0705, "gpt-4o-transcribe_time_s": 4.479, "gpt-4o-transcribe_rtf": 0.0329, "gpt-4o-transcribe_words": 155, "gpt-4o-transcribe_cost_usd": 0.0136, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 19"}, {"duration_s": 55.983, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 36.063, "local_rtf": 0.6442, "local_words": 47, "local_wer": 0.14, "whisper-1_time_s": 2.062, "whisper-1_rtf": 0.0368, "whisper-1_words": 49, "whisper-1_cost_usd": 0.005598, "whisper-1_wer": 0.08, "gpt-4o-transcribe_time_s": 1.612, "gpt-4o-transcribe_rtf": 0.0288, "gpt-4o-transcribe_words": 50, "gpt-4o-transcribe_cost_usd": 0.005598, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 20"}, {"duration_s": 38.94, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 34.882, "local_rtf": 0.8958, "local_words": 2, "local_wer": 1.0, "whisper-1_time_s": 1.449, "whisper-1_rtf": 0.0372, "whisper-1_words": 2, "whisper-1_cost_usd": 0.003894, "whisper-1_wer": 1.0, "gpt-4o-transcribe_time_s": 0.79, "gpt-4o-transcribe_rtf": 0.0203, "gpt-4o-transcribe_words": 5, "gpt-4o-transcribe_cost_usd": 0.003894, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 21"}, {"duration_s": 467.232, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 222.402, "local_rtf": 0.476, "local_words": 342, "local_wer": 0.1697, "whisper-1_time_s": 16.183, "whisper-1_rtf": 0.0346, "whisper-1_words": 391, "whisper-1_cost_usd": 0.046723, "whisper-1_wer": 0.0488, "gpt-4o-transcribe_time_s": 12.006, "gpt-4o-transcribe_rtf": 0.0257, "gpt-4o-transcribe_words": 386, "gpt-4o-transcribe_cost_usd": 0.046723, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 22"}, {"duration_s": 160.078, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 87.024, "local_rtf": 0.5436, "local_words": 210, "local_wer": 0.0865, "whisper-1_time_s": 6.919, "whisper-1_rtf": 0.0432, "whisper-1_words": 208, "whisper-1_cost_usd": 0.016008, "whisper-1_wer": 0.0288, "gpt-4o-transcribe_time_s": 4.668, "gpt-4o-transcribe_rtf": 0.0292, "gpt-4o-transcribe_words": 208, "gpt-4o-transcribe_cost_usd": 0.016008, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 23"}, {"duration_s": 232.85, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 109.482, "local_rtf": 0.4702, "local_words": 208, "local_wer": 0.1566, "whisper-1_time_s": 7.024, "whisper-1_rtf": 0.0302, "whisper-1_words": 198, "whisper-1_cost_usd": 0.023285, "whisper-1_wer": 0.0202, "gpt-4o-transcribe_time_s": 5.439, "gpt-4o-transcribe_rtf": 0.0234, "gpt-4o-transcribe_words": 196, "gpt-4o-transcribe_cost_usd": 0.023285, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 24"}, {"duration_s": 16.3, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 23.896, "local_rtf": 1.466, "local_words": 17, "local_wer": 0.0, "whisper-1_time_s": 0.823, "whisper-1_rtf": 0.0505, "whisper-1_words": 17, "whisper-1_cost_usd": 0.00163, "whisper-1_wer": 0.0, "gpt-4o-transcribe_time_s": 1.123, "gpt-4o-transcribe_rtf": 0.0689, "gpt-4o-transcribe_words": 17, "gpt-4o-transcribe_cost_usd": 0.00163, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 25"}, {"duration_s": 85.333, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 48.209, "local_rtf": 0.565, "local_words": 88, "local_wer": 0.0345, "whisper-1_time_s": 3.189, "whisper-1_rtf": 0.0374, "whisper-1_words": 87, "whisper-1_cost_usd": 0.008533, "whisper-1_wer": 0.023, "gpt-4o-transcribe_time_s": 2.621, "gpt-4o-transcribe_rtf": 0.0307, "gpt-4o-transcribe_words": 86, "gpt-4o-transcribe_cost_usd": 0.008533, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 26"}, {"duration_s": 50.55, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 35.379, "local_rtf": 0.6999, "local_words": 18, "local_wer": 0.125, "whisper-1_time_s": 1.654, "whisper-1_rtf": 0.0327, "whisper-1_words": 17, "whisper-1_cost_usd": 0.005055, "whisper-1_wer": 0.0625, "gpt-4o-transcribe_time_s": 1.315, "gpt-4o-transcribe_rtf": 0.026, "gpt-4o-transcribe_words": 16, "gpt-4o-transcribe_cost_usd": 0.005055, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 27"}, {"duration_s": 14.768, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 23.759, "local_rtf": 1.6088, "local_words": 11, "local_wer": 0.0, "whisper-1_time_s": 1.256, "whisper-1_rtf": 0.085, "whisper-1_words": 11, "whisper-1_cost_usd": 0.001477, "whisper-1_wer": 0.0, "gpt-4o-transcribe_time_s": 0.783, "gpt-4o-transcribe_rtf": 0.053, "gpt-4o-transcribe_words": 11, "gpt-4o-transcribe_cost_usd": 0.001477, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 28"}, {"duration_s": 36.246, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 36.237, "local_rtf": 0.9998, "local_words": 42, "local_wer": 0.0, "whisper-1_time_s": 1.869, "whisper-1_rtf": 0.0516, "whisper-1_words": 42, "whisper-1_cost_usd": 0.003625, "whisper-1_wer": 0.0, "gpt-4o-transcribe_time_s": 1.694, "gpt-4o-transcribe_rtf": 0.0467, "gpt-4o-transcribe_words": 42, "gpt-4o-transcribe_cost_usd": 0.003625, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 29"}, {"duration_s": 40.519, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 35.608, "local_rtf": 0.8788, "local_words": 33, "local_wer": 0.0, "whisper-1_time_s": 1.471, "whisper-1_rtf": 0.0363, "whisper-1_words": 33, "whisper-1_cost_usd": 0.004052, "whisper-1_wer": 0.0, "gpt-4o-transcribe_time_s": 1.462, "gpt-4o-transcribe_rtf": 0.0361, "gpt-4o-transcribe_words": 33, "gpt-4o-transcribe_cost_usd": 0.004052, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 30"}, {"duration_s": 13.746, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 23.767, "local_rtf": 1.729, "local_words": 15, "local_wer": 0.0, "whisper-1_time_s": 0.991, "whisper-1_rtf": 0.0721, "whisper-1_words": 15, "whisper-1_cost_usd": 0.001375, "whisper-1_wer": 0.0, "gpt-4o-transcribe_time_s": 0.837, "gpt-4o-transcribe_rtf": 0.0609, "gpt-4o-transcribe_words": 15, "gpt-4o-transcribe_cost_usd": 0.001375, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 31"}, {"duration_s": 22.477, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 23.707, "local_rtf": 1.0547, "local_words": 11, "local_wer": 0.0, "whisper-1_time_s": 0.97, "whisper-1_rtf": 0.0432, "whisper-1_words": 11, "whisper-1_cost_usd": 0.002248, "whisper-1_wer": 0.0, "gpt-4o-transcribe_time_s": 1.222, "gpt-4o-transcribe_rtf": 0.0544, "gpt-4o-transcribe_words": 11, "gpt-4o-transcribe_cost_usd": 0.002248, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 32"}, {"duration_s": 34.435, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 37.175, "local_rtf": 1.0796, "local_words": 27, "local_wer": 0.08, "whisper-1_time_s": 1.685, "whisper-1_rtf": 0.0489, "whisper-1_words": 25, "whisper-1_cost_usd": 0.003444, "whisper-1_wer": 0.0, "gpt-4o-transcribe_time_s": 1.276, "gpt-4o-transcribe_rtf": 0.0371, "gpt-4o-transcribe_words": 25, "gpt-4o-transcribe_cost_usd": 0.003444, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 33"}, {"duration_s": 328.005, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 150.84, "local_rtf": 0.4599, "local_words": 385, "local_wer": 0.1856, "whisper-1_time_s": 13.295, "whisper-1_rtf": 0.0405, "whisper-1_words": 361, "whisper-1_cost_usd": 0.032801, "whisper-1_wer": 0.072, "gpt-4o-transcribe_time_s": 9.795, "gpt-4o-transcribe_rtf": 0.0299, "gpt-4o-transcribe_words": 357, "gpt-4o-transcribe_cost_usd": 0.032801, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 34"}, {"duration_s": 176.727, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 82.115, "local_rtf": 0.4646, "local_words": 19, "local_wer": 0.1667, "whisper-1_time_s": 3.848, "whisper-1_rtf": 0.0218, "whisper-1_words": 20, "whisper-1_cost_usd": 0.017673, "whisper-1_wer": 0.1111, "gpt-4o-transcribe_time_s": 2.92, "gpt-4o-transcribe_rtf": 0.0165, "gpt-4o-transcribe_words": 18, "gpt-4o-transcribe_cost_usd": 0.017673, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 35"}, {"duration_s": 167.718, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 85.553, "local_rtf": 0.5101, "local_words": 125, "local_wer": 0.1241, "whisper-1_time_s": 6.758, "whisper-1_rtf": 0.0403, "whisper-1_words": 139, "whisper-1_cost_usd": 0.016772, "whisper-1_wer": 0.0552, "gpt-4o-transcribe_time_s": 4.936, "gpt-4o-transcribe_rtf": 0.0294, "gpt-4o-transcribe_words": 139, "gpt-4o-transcribe_cost_usd": 0.016772, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 36"}, {"duration_s": 309.522, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 149.373, "local_rtf": 0.4826, "local_words": 272, "local_wer": 0.2046, "whisper-1_time_s": 12.539, "whisper-1_rtf": 0.0405, "whisper-1_words": 251, "whisper-1_cost_usd": 0.030952, "whisper-1_wer": 0.0193, "gpt-4o-transcribe_time_s": 9.203, "gpt-4o-transcribe_rtf": 0.0297, "gpt-4o-transcribe_words": 250, "gpt-4o-transcribe_cost_usd": 0.030952, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 37"}, {"duration_s": 137.648, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 73.432, "local_rtf": 0.5335, "local_words": 138, "local_wer": 0.0797, "whisper-1_time_s": 4.711, "whisper-1_rtf": 0.0342, "whisper-1_words": 140, "whisper-1_cost_usd": 0.013765, "whisper-1_wer": 0.0725, "gpt-4o-transcribe_time_s": 3.949, "gpt-4o-transcribe_rtf": 0.0287, "gpt-4o-transcribe_words": 138, "gpt-4o-transcribe_cost_usd": 0.013765, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 38"}, {"duration_s": 255.35, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 124.127, "local_rtf": 0.4861, "local_words": 221, "local_wer": 0.1938, "whisper-1_time_s": 11.035, "whisper-1_rtf": 0.0432, "whisper-1_words": 230, "whisper-1_cost_usd": 0.025535, "whisper-1_wer": 0.0969, "gpt-4o-transcribe_time_s": 6.513, "gpt-4o-transcribe_rtf": 0.0255, "gpt-4o-transcribe_words": 227, "gpt-4o-transcribe_cost_usd": 0.025535, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 39"}, {"duration_s": 120.349, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 71.41, "local_rtf": 0.5934, "local_words": 60, "local_wer": 0.0847, "whisper-1_time_s": 4.941, "whisper-1_rtf": 0.0411, "whisper-1_words": 53, "whisper-1_cost_usd": 0.012035, "whisper-1_wer": 0.1695, "gpt-4o-transcribe_time_s": 2.657, "gpt-4o-transcribe_rtf": 0.0221, "gpt-4o-transcribe_words": 59, "gpt-4o-transcribe_cost_usd": 0.012035, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 40"}, {"duration_s": 133.492, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 72.061, "local_rtf": 0.5398, "local_words": 87, "local_wer": 0.1383, "whisper-1_time_s": 3.961, "whisper-1_rtf": 0.0297, "whisper-1_words": 94, "whisper-1_cost_usd": 0.013349, "whisper-1_wer": 0.0106, "gpt-4o-transcribe_time_s": 3.303, "gpt-4o-transcribe_rtf": 0.0247, "gpt-4o-transcribe_words": 94, "gpt-4o-transcribe_cost_usd": 0.013349, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 41"}, {"duration_s": 329.747, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 146.95, "local_rtf": 0.4456, "local_words": 200, "local_wer": 0.2698, "whisper-1_time_s": 10.789, "whisper-1_rtf": 0.0327, "whisper-1_words": 202, "whisper-1_cost_usd": 0.032975, "whisper-1_wer": 0.0791, "gpt-4o-transcribe_time_s": 7.327, "gpt-4o-transcribe_rtf": 0.0222, "gpt-4o-transcribe_words": 212, "gpt-4o-transcribe_cost_usd": 0.032975, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 42"}, {"duration_s": 213.577, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 106.472, "local_rtf": 0.4985, "local_words": 83, "local_wer": 0.093, "whisper-1_time_s": 5.529, "whisper-1_rtf": 0.0259, "whisper-1_words": 85, "whisper-1_cost_usd": 0.021358, "whisper-1_wer": 0.0349, "gpt-4o-transcribe_time_s": 4.359, "gpt-4o-transcribe_rtf": 0.0204, "gpt-4o-transcribe_words": 85, "gpt-4o-transcribe_cost_usd": 0.021358, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 43"}, {"duration_s": 39.288, "ground_truth_key": "gpt-4o-transcribe", "local_time_s": 35.29, "local_rtf": 0.8982, "local_words": 18, "local_wer": 0.0, "whisper-1_time_s": 1.168, "whisper-1_rtf": 0.0297, "whisper-1_words": 18, "whisper-1_cost_usd": 0.003929, "whisper-1_wer": 0.0, "gpt-4o-transcribe_time_s": 1.3, "gpt-4o-transcribe_rtf": 0.0331, "gpt-4o-transcribe_words": 18, "gpt-4o-transcribe_cost_usd": 0.003929, "gpt-4o-transcribe_wer": 0.0, "stem": "Rec 44"}], "aggregate": {"total_files": 44, "total_duration_min": 84.83, "backend_keys": ["whisper-1", "gpt-4o-transcribe"], "ground_truth_key": "gpt-4o-transcribe", "local_rtf": {"mean": 1.0671, "median": 0.7118, "p95": 1.729, "min": 0.4456, "max": 13.3167, "n": 44}, "local_wer": {"mean": 0.1993, "median": 0.093, "p95": 1.0, "min": 0.0, "max": 2.0, "n": 44}, "whisper-1_rtf": {"mean": 0.0612, "median": 0.0432, "p95": 0.1053, "min": 0.0218, "max": 0.6414, "n": 44}, "whisper-1_total_cost": 0.509, "whisper-1_wer": {"mean": 0.2639, "median": 0.0725, "p95": 1.0667, "min": 0.0106, "max": 2.0, "n": 34}, "gpt-4o-transcribe_rtf": {"mean": 0.0427, "median": 0.0329, "p95": 0.067, "min": 0.0165, "max": 0.3422, "n": 44}, "gpt-4o-transcribe_total_cost": 0.509, "gpt-4o-transcribe_wer": {}}};
+const pf = DATA.per_file;
+const agg = DATA.aggregate;
+const backendKeys = ["whisper-1", "gpt-4o-transcribe"];
+const allKeys = ["local", "whisper-1", "gpt-4o-transcribe"];
+const colorsLine = ["#34d399", "#60a5fa", "#f472b6"];
+const colorsFill = ["#34d39966", "#60a5fa66", "#f472b666"];
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function fmt(v, d=3, sfx='') {
+  if(v===null||v===undefined) return '<span class="null">—</span>';
+  return (+v).toFixed(d)+sfx;
+}
+function fmtWer(v) {
+  if(v===null||v===undefined) return '<span class="null">—</span>';
+  const pct=Math.min(v*100,100);
+  const c=pct<20?'#4ade80':pct<40?'#facc15':'#f87171';
+  return `<span style="color:${c}">${(+v).toFixed(3)}</span><span class="wbar" style="width:${Math.round(pct)}px;background:${c}"></span>`;
+}
+
+// ── Table ─────────────────────────────────────────────────────────────────
+let sortCol=1, sortAsc=false, activeRow=null;
+
+function rowCols(r) {
+  const cols=[
+    r.stem,
+    r.duration_s?(r.duration_s/60).toFixed(1)+'m':'—',
+    fmt(r.local_time_s,1,'s'), fmt(r.local_rtf,3), fmtWer(r.local_wer),
+  ];
+  for(const k of backendKeys) {
+    cols.push(fmt(r[k+'_time_s'],1,'s'), fmt(r[k+'_rtf'],3), fmtWer(r[k+'_wer']), fmtWer(r[k+'_cross_wer']));
+  }
+  const totalCost = backendKeys.reduce((s,k)=>s+(r[k+'_cost_usd']||0),0);
+  cols.push(totalCost?'$'+totalCost.toFixed(4):'<span class="null">—</span>');
+  return cols;
+}
+
+function buildRows(data) {
+  return data.map((r,i)=>`<tr data-i="${i}" onclick="selectRow(this)">${rowCols(r).map(c=>`<td>${c}</td>`).join('')}</tr>`).join('');
+}
+
+let filteredData = pf;
+function filterTable() {
+  const q=document.getElementById('fi').value.toLowerCase();
+  filteredData=q?pf.filter(r=>r.stem.toLowerCase().includes(q)):pf;
+  document.getElementById('tb').innerHTML=buildRows(filteredData);
+}
+
+const sortKeys=['stem','duration_s','local_time_s','local_rtf','local_wer',
+  ...backendKeys.flatMap(k=>[k+'_time_s',k+'_rtf',k+'_wer',k+'_cross_wer']),
+  backendKeys[0]+'_cost_usd'];
+
+function sortTable(col) {
+  if(sortCol===col) sortAsc=!sortAsc; else {sortCol=col;sortAsc=true;}
+  const k=sortKeys[col];
+  filteredData=[...filteredData].sort((a,b)=>{
+    const av=a[k],bv=b[k];
+    if(av==null&&bv==null)return 0;
+    if(av==null)return 1; if(bv==null)return -1;
+    return sortAsc?(av>bv?1:-1):(av<bv?1:-1);
+  });
+  document.getElementById('tb').innerHTML=buildRows(filteredData);
+}
+
+// ── Diff viewer ───────────────────────────────────────────────────────────
+function normWord(w) {
+  return w.toLowerCase().replace(/[^\w]/g, '');
+}
+function wordDiff(ref, hyp) {
+  if(!ref||!hyp) return hyp||'<span class="null">—</span>';
+  const rw=ref.split(/[\s]+/),hw=hyp.split(/[\s]+/);
+  const m=rw.length,n=hw.length;
+  const dp=Array.from({length:m+1},()=>new Array(n+1).fill(0));
+  for(let i=1;i<=m;i++) for(let j=1;j<=n;j++)
+    dp[i][j]=normWord(rw[i-1])===normWord(hw[j-1])?dp[i-1][j-1]+1:Math.max(dp[i-1][j],dp[i][j-1]);
+  const ops=[];let i=m,j=n;
+  while(i>0||j>0){
+    if(i>0&&j>0&&normWord(rw[i-1])===normWord(hw[j-1])){ops.push(['eq',hw[j-1]]);i--;j--;}
+    else if(j>0&&(i===0||dp[i][j-1]>=dp[i-1][j])){ops.push(['ins',hw[j-1]]);j--;}
+    else{ops.push(['del',rw[i-1]]);i--;}
+  }
+  ops.reverse();
+  return ops.map(([t,w])=>t==='eq'?w:t==='ins'?`<mark class="ins">${w}</mark>`:`<mark class="del">${w}</mark>`).join(' ');
+}
+
+function selectRow(tr) {
+  if(!document.getElementById('diffPanel')) return;
+  if(activeRow) activeRow.classList.remove('active');
+  activeRow=tr; tr.classList.add('active');
+  const stem=tr.querySelector('td').textContent;
+  const rec=pf.find(x=>x.stem===stem)||filteredData[+tr.dataset.i];
+  document.getElementById('diffTitle').textContent=`Transcript comparison — ${rec.stem}`;
+  const gtKey=agg.ground_truth_key;
+  const ref=rec[gtKey+'_text']||'';
+  const panels=[
+    {label:gtKey+' (reference)',key:gtKey,text:rec[gtKey+'_text'],color:'#f59e0b',isRef:true},
+    {label:'Local',key:'local',text:rec.local_text,color:'#34d399'},
+    ...backendKeys.filter(k=>k!==gtKey).map((k,i)=>{return{label:k,key:k,text:rec[k+'_text'],color:colorsLine[i+2]}})
+  ];
+  const grid=document.getElementById('diffGrid');
+  grid.style.gridTemplateColumns=`repeat(${panels.length},1fr)`;
+  grid.innerHTML=panels.map(p=>`
+    <div class="card">
+      <h3 style="color:${p.color}">${p.label}</h3>
+      <div class="diff-text">${p.isRef?(p.text||'<span class="null">No reference</span>'):wordDiff(ref,p.text)}</div>
+    </div>`).join('');
+  document.getElementById('diffPanel').classList.add('visible');
+  document.getElementById('diffPanel').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+// ── Charts ────────────────────────────────────────────────────────────────
+const chartOpts = {
+  plugins:{legend:{labels:{color:'#94a3b8'}}},
+  scales:{
+    x:{ticks:{color:'#64748b'},grid:{color:'#1f2233'}},
+    y:{ticks:{color:'#64748b'},grid:{color:'#1f2233'}}
+  }
+};
+
+// Speed scatter
+const withLocal = pf.filter(r=>r.local_time_s);
+new Chart(document.getElementById('speedChart'),{
+  type:'scatter',
+  data:{datasets:[
+    {label:'Local',data:withLocal.map(r=>{return{x:r.duration_s,y:r.local_time_s}}),backgroundColor:'#34d399aa',pointRadius:5},
+    ...backendKeys.map((k,i)=>{
+      const d=pf.filter(r=>r[k+'_time_s']);
+      return{label:k,data:d.map(r=>{return{x:r.duration_s,y:r[k+'_time_s']}}),backgroundColor:colorsLine[i+1]+'aa',pointRadius:5};
+    })
+  ]},
+  options:{...chartOpts,scales:{
+    x:{...chartOpts.scales.x,title:{display:true,text:'Audio duration (s)',color:'#64748b'}},
+    y:{...chartOpts.scales.y,title:{display:true,text:'Transcription time (s)',color:'#64748b'}}
+  }}
+});
+
+// RTF bar
+const rtfData=pf.filter(r=>r.local_rtf||backendKeys.some(k=>r[k+'_rtf']));
+new Chart(document.getElementById('rtfChart'),{
+  type:'bar',
+  data:{
+    labels:rtfData.map(r=>r.stem.startsWith('Rec ')?r.stem:r.stem.slice(5,16)),
+    datasets:[
+      {label:'Local RTF',data:rtfData.map(r=>r.local_rtf),backgroundColor:'#34d39966'},
+      ...backendKeys.map((k,i)=>{return{label:k+' RTF',data:rtfData.map(r=>r[k+'_rtf']),backgroundColor:colorsFill[i+1]}})
+    ]
+  },
+  options:{...chartOpts,scales:{
+    x:{...chartOpts.scales.x,ticks:{maxRotation:90,font:{size:9},color:'#64748b'}},
+    y:{...chartOpts.scales.y,title:{display:true,text:'RTF',color:'#64748b'}}
+  }}
+});
+
+// WER histogram
+const werEl=document.getElementById('werChart');
+if(werEl){
+  const buckets=new Array(10).fill(0);
+  const localH=[...buckets],apiHists=Object.fromEntries(backendKeys.map(k=>[k,[...buckets]]));
+  pf.forEach(r=>{
+    if(r.local_wer!=null) localH[Math.min(Math.floor(r.local_wer*10),9)]++;
+    backendKeys.forEach(k=>{ if(r[k+'_wer']!=null) apiHists[k][Math.min(Math.floor(r[k+'_wer']*10),9)]++; });
+  });
+  new Chart(werEl,{
+    type:'bar',
+    data:{
+      labels:['0–10%','10–20%','20–30%','30–40%','40–50%','50–60%','60–70%','70–80%','80–90%','90–100%'],
+      datasets:[
+        {label:'Local WER',data:localH,backgroundColor:'#34d39966'},
+        ...backendKeys.map((k,i)=>{return{label:k+' WER',data:apiHists[k],backgroundColor:colorsFill[i+1]}})
+      ]
+    },
+    options:{...chartOpts,scales:{
+      x:{...chartOpts.scales.x,title:{display:true,text:'WER bucket',color:'#64748b'}},
+      y:{...chartOpts.scales.y,title:{display:true,text:'# files',color:'#64748b'}}
+    }}
+  });
+}
+
+// Init
+filteredData=pf;
+document.getElementById('tb').innerHTML=buildRows(pf);
+</script>
+</body>
+</html>
