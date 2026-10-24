@@ -16,7 +16,7 @@
 ## Ideas (not planned)
 
 - Repeat the timing runs to measure variation between runs (every file was run once per system).
-- Test the local model on a GPU, and with a model that stays loaded between files.
+- Test the local model on a GPU, with a model that stays loaded between files, and with 6 threads like the resident server (the benchmark used the `whisper-cli` default of 4).
 - Check the repetition problem of the local model more closely (decoding settings, e.g. temperature fallback or no-speech threshold).
 - Use a human-corrected transcript for a subset, so WER does not only measure agreement with `gpt-4o-transcribe`.
 - Publish the public report as a web page.

@@ -2,6 +2,17 @@
 
 Compare local whisper.cpp against OpenAI's transcription APIs on real voice recordings.
 
+## Motivation
+
+Cost is only part of the reason. The online services are cheap ($0.006 per minute, about $10.80 for 30 hours of audio a month), so the real question is **whether, and for which use cases, a local speech-to-text (STT) model makes sense**, and where the online services are clearly better.
+
+The author uses the local model today for:
+
+- **speech input to [OpenClaw](https://github.com/openclaw/openclaw)**, a personal AI assistant, and
+- **transcribing voice notes and ideas**, for example a dream journal. These are not interactive: the text is needed minutes later, so speed is not essential.
+
+What a local model offers for such uses: voice notes are personal and **never leave the machine**; there is **no API key, no per-minute cost and no dependency** on an online service being reachable. What it costs: processor time, memory (see [Resource use](#resource-use-memory)), and speed and accuracy that may fall short for some uses. This benchmark measures exactly that trade-off on real recordings.
+
 **Backends:**
 - **Local** — whisper.cpp `ggml-large-v3-turbo-q5_0`, called directly via CLI
 - **whisper-1** — OpenAI Transcriptions API, classic Whisper large-v2 model
@@ -34,7 +45,30 @@ Compare local whisper.cpp against OpenAI's transcription APIs on real voice reco
 - **Accuracy is close on average, but not equal.** Local and whisper-1 have similar mean WER (0.094 vs 0.099); whisper-1 is better at the median (0.046 vs 0.086). On recordings of 3 minutes and more (9 files) local is clearly further from the reference (0.17 vs 0.05).
 - **The local model sometimes repeats words or whole phrases**, mostly at the end of a clause or sentence, sometimes several times in a row: 13 times in 7 files (whisper-1: 3 in 2 files, gpt-4o-transcribe: 0). 6 of the 7 files are longer than 3 minutes.
 - **Nearly empty recordings are excluded.** 4 recordings have fewer than 10 reference words. One word is a 10-100% error there, which says nothing about quality. Counting them would raise the mean WER to 0.199 (local) and 0.204 (whisper-1).
-- **Caveats:** one speaker, 40 analysed files, one run on one server (CPU only), and a machine-made reference.
+- **Caveats:** one speaker, 40 analysed files, one run on one server (CPU only), and a machine-made reference. The local run used `whisper-cli` with its default of 4 threads and loaded the model for every file; the resident `whisper-server` of the same machine uses 6 threads and keeps the model loaded. On one 62-second recording it took 36 s instead of 50 s, so the local timings here are somewhat pessimistic for server use (single sample, not a systematic measurement).
+
+### Use cases: what this suggests
+
+- **Voice notes, journaling, ideas (asynchronous):** local is a good fit. A typical note takes well under its own length to transcribe (median RTF about 0.7), nobody waits for it, the text stays on the machine, and on recordings up to about 3 minutes the mean WER is close to, or lower than, that of whisper-1 in this benchmark. For notes over about 3 minutes, expect more differences and occasional repeated phrases (see above) and check the text, or split long recordings.
+- **Speech input to an assistant (short messages):** workable if a few seconds to about a minute of waiting is acceptable. A resident server (model already loaded) is clearly better than starting the program for every message. If answers are expected quickly, the online services respond in a few seconds at any length.
+- **Real-time or interactive dictation:** not a good fit for a CPU-only local setup; the online services are about 20 times faster here.
+- **Large volumes where cost matters:** at $0.006 per minute this is rarely the deciding factor; privacy and independence are better reasons to stay local.
+
+These are readings of one benchmark with one speaker, not general rules.
+
+### Resource use (memory)
+
+Measured on 24 October 2026 on the same machine as the benchmark: a virtual machine with 7.9 GiB RAM and 8 vCPUs (AMD Ryzen 9 PRO 8945HS), no GPU, model `ggml-large-v3-turbo-q5_0` (574 MB file = 547 MiB).
+
+| Setup | Memory | Time |
+|---|---|---|
+| Resident `whisper-server` (6 threads), idle | 725 MiB resident | n/a |
+| Same server during one 62 s recording | up to 761 MiB | 36 s |
+| `whisper-cli` (4 threads), one call, 62 s recording | peak 824 MiB | 50 s |
+| `whisper-cli` (4 threads), one call, 467 s recording | peak 937 MiB | 227 s |
+| Small proxy that converts audio formats in front of the server | 20 MiB | n/a |
+
+Memory is dominated by the model (about 550 MiB) and grows only slowly with recording length (about 110 MiB more for a recording 7.5 times longer). A resident server therefore costs roughly 0.75 GiB of RAM permanently, which is fine on a machine with several GiB but would be a real share on a small board. Method: peak = maximum resident set size reported by `/usr/bin/time -v`; for the server, resident memory read from `/proc` every 0.25 s while one recording went through the proxy. One run each, so treat the figures as approximate.
 
 The public report contains these results with the method, a glossary and the observations in full: [`results/report-public.html`](results/report-public.html) (download and open in a browser; it loads Chart.js from a CDN).
 
