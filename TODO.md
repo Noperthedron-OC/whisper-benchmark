@@ -11,10 +11,7 @@
 - [x] Review of the analysis (24 Oct 2026): equal averaging, true median, empty transcripts count as WER 1.0, nearly empty recordings excluded (`MIN_REFERENCE_WORDS`), dead cross-WER column removed
 - [x] Re-run, README with results, public report
 - [x] Private data (transcripts, metrics, corpus list) removed from the repository and its history, now ignored
-
-## Open
-
-- [ ] Make the repository public. First attempt (24 Oct 2026) was reverted: GitHub still served old commits (with transcripts) by hash. Needs a fresh repository with the clean history, or a GitHub Support request to purge the old objects.
+- [x] Repository made public (24 Oct 2026) as a fresh repository with the clean history; the old private one was renamed `whisper-benchmark-old` and is to be deleted
 
 ## Ideas (not planned)
 
