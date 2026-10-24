@@ -1,5 +1,7 @@
 # Whisper Benchmark — Specification
 
+> **Status (24 Oct 2026):** this spec is the original plan. Decisions made during the work: the iOS reference transcripts were dropped (all WER is measured against `gpt-4o-transcribe`); a second API backend was added; recordings with fewer than 10 reference words are excluded from all statistics; the `cross_wer` metric was not implemented. See `README.md` for the current method and results.
+
 ## Goal
 
 Quantify the real-world difference between local whisper.cpp and the OpenAI Whisper API on Erich's actual voice recordings. Produce actionable data: is the local model fast enough and accurate enough to justify staying offline, or does the API justify its cost?
@@ -29,7 +31,7 @@ Quantify the real-world difference between local whisper.cpp and the OpenAI Whis
 - Model: `ggml-large-v3-turbo-q5_0` (quantised large-v3-turbo, ~550 MB)
 - Flags: `--language auto --no-timestamps --no-prints`
 - Audio pre-processing: ffmpeg → WAV 16 kHz mono (matching `transcribe.sh`)
-- Timing: wall-clock from subprocess start to return (includes ffmpeg + inference)
+- Timing: wall-clock of the `whisper-cli` run only (model load + inference). The ffmpeg conversion happens before the clock starts and is not counted (corrected 24 Oct 2026 to match the code)
 
 ### API — OpenAI Whisper
 - Endpoint: `POST https://api.openai.com/v1/audio/transcriptions`

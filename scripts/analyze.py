@@ -3,11 +3,18 @@
 Compute per-file and aggregate metrics from benchmark results.
 Ground truth: config.GROUND_TRUTH_BACKEND (gpt-4o-transcribe).
 iOS reference ignored — all WER is computed against the ground truth backend.
+
+Recordings whose reference has fewer than config.MIN_REFERENCE_WORDS words are flagged
+"excluded": they stay in the per-file rows and in the cost total, but are left out of every
+RTF and WER statistic (one word is a 10-100 % error there and says nothing about quality).
+
 Outputs results/metrics.json.
 """
 
 import json
+import math
 import re
+import statistics
 import sys
 from pathlib import Path
 
@@ -26,9 +33,14 @@ def normalise(text: str) -> str:
 
 
 def safe_wer(ref: str, hyp: str) -> float | None:
+    """WER of hyp against ref. No reference words -> None (undefined).
+    An empty hypothesis against a non-empty reference is a real failure (every word deleted),
+    so it counts as 1.0 instead of silently dropping the file from the statistics."""
     ref_n, hyp_n = normalise(ref), normalise(hyp)
-    if not ref_n or not hyp_n:
+    if not ref_n:
         return None
+    if not hyp_n:
+        return 1.0
     try:
         return round(wer(ref_n, hyp_n), 4)
     except Exception:
@@ -36,11 +48,15 @@ def safe_wer(ref: str, hyp: str) -> float | None:
 
 
 def percentile(values: list[float], p: int) -> float:
+    """Median for p=50 (mean of the two middle values for an even count);
+    nearest-rank percentile otherwise."""
     if not values:
         return 0.0
     values = sorted(values)
-    idx = int(len(values) * p / 100)
-    return round(values[min(idx, len(values) - 1)], 4)
+    if p == 50:
+        return round(statistics.median(values), 4)
+    idx = math.ceil(len(values) * p / 100) - 1
+    return round(values[min(max(idx, 0), len(values) - 1)], 4)
 
 
 def load_results(directory: Path) -> dict[str, dict]:
@@ -97,10 +113,13 @@ def main():
         duration = (l or first_api or {}).get("duration_s", 0)
         gt_text = gt_results.get(stem, {}).get("text") if gt_results else None
 
+        ref_words = len(normalise(gt_text).split()) if gt_text else 0
         row = {
             "stem": stem,
             "duration_s": duration,
             "ground_truth_key": gt_key,
+            "reference_words": ref_words,
+            "excluded": ref_words < config.MIN_REFERENCE_WORDS,
             "local_text": l["text"] if l else None,
         }
 
@@ -125,25 +144,34 @@ def main():
 
         per_file.append(row)
 
+    kept = [r for r in per_file if not r["excluded"]]
     aggregate = {
         "total_files": len(per_file),
         "total_duration_min": round(sum(r["duration_s"] for r in per_file) / 60, 2),
+        "analysed_files": len(kept),
+        "excluded_files": len(per_file) - len(kept),
+        "min_reference_words": config.MIN_REFERENCE_WORDS,
+        "analysed_duration_min": round(sum(r["duration_s"] for r in kept) / 60, 2),
         "backend_keys": backend_keys,
         "ground_truth_key": gt_key,
-        "local_rtf": agg_stats([r["local_rtf"] for r in per_file if r.get("local_rtf")]),
-        "local_wer": agg_stats([r["local_wer"] for r in per_file if r.get("local_wer") is not None]),
+        # speed and error statistics: analysed files only; cost: every file (that is what was billed)
+        "local_rtf": agg_stats([r["local_rtf"] for r in kept if r.get("local_rtf")]),
+        "local_wer": agg_stats([r["local_wer"] for r in kept if r.get("local_wer") is not None]),
     }
     for key in backend_keys:
-        aggregate[f"{key}_rtf"] = agg_stats([r[f"{key}_rtf"] for r in per_file if r.get(f"{key}_rtf")])
+        aggregate[f"{key}_rtf"] = agg_stats([r[f"{key}_rtf"] for r in kept if r.get(f"{key}_rtf")])
         aggregate[f"{key}_total_cost"] = round(sum(r.get(f"{key}_cost_usd", 0) for r in per_file), 4)
-        wers = [r[f"{key}_wer"] for r in per_file if r.get(f"{key}_wer") is not None and r[f"{key}_wer"] > 0]
-        aggregate[f"{key}_wer"] = agg_stats(wers)
+        if key != gt_key:  # the reference is perfect by definition; it has no WER statistics
+            aggregate[f"{key}_wer"] = agg_stats(
+                [r[f"{key}_wer"] for r in kept if r.get(f"{key}_wer") is not None])
 
     metrics = {"per_file": per_file, "aggregate": aggregate}
     config.METRICS_FILE.write_text(json.dumps(metrics, indent=2, ensure_ascii=False))
 
     print(f"\n{'='*55}")
-    print(f"Total audio:    {aggregate['total_duration_min']:.1f} min")
+    print(f"Total audio:    {aggregate['total_duration_min']:.1f} min "
+          f"| analysed: {aggregate['analysed_files']} files, excluded {aggregate['excluded_files']} "
+          f"(reference < {config.MIN_REFERENCE_WORDS} words)")
     for key in backend_keys:
         print(f"Cost [{key}]: ${aggregate[f'{key}_total_cost']:.4f}")
     if aggregate["local_rtf"]:
@@ -155,7 +183,7 @@ def main():
     if aggregate["local_wer"].get("n"):
         print(f"Local WER vs {gt_key}: {aggregate['local_wer']['mean']:.3f} (n={aggregate['local_wer']['n']})")
     for key in backend_keys:
-        s = aggregate[f"{key}_wer"]
+        s = aggregate.get(f"{key}_wer", {})
         if s.get("n"):
             print(f"{key} WER vs {gt_key}: {s['mean']:.3f} (n={s['n']})")
     print(f"{'='*55}")

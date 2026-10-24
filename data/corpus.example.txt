@@ -1,0 +1,2 @@
+# one recording per line: <stem>\t<path to .m4a>\t<path to reference .txt or NONE>
+2026-01-01_10-00-00	/path/to/recordings/2026-01-01_10-00-00.m4a	NONE

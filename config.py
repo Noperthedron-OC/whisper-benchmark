@@ -25,6 +25,10 @@ API_BACKENDS = [
 # Backend whose output is treated as ground truth for WER
 GROUND_TRUTH_BACKEND = "gpt-4o-transcribe"
 
+# Recordings whose reference has fewer words than this (almost no speech) are left out of all
+# speed and error statistics. They stay in the per-file table and in the cost total.
+MIN_REFERENCE_WORDS = 10
+
 LOCAL_TIMEOUT = 300
 API_TIMEOUT = 120
 API_RETRY_DELAY = 5

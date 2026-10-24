@@ -2,3 +2,9 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+
+# private: transcripts and recording names of personal voice notes
+results/raw/
+results/metrics.json
+results/report.html
+data/corpus.txt

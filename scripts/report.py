@@ -36,24 +36,6 @@ def sanitize(metrics: dict) -> dict:
     return {"per_file": per_file, "aggregate": metrics["aggregate"]}
 
 
-def like_for_like(per_file: list, keys: list, gt: str) -> str:
-    """Mean/median WER over ALL files for every non-reference system, computed here
-    from the per-file numbers, so the comparison does not depend on how the
-    aggregate cards were filtered."""
-    rows = ""
-    for k in keys:
-        if k == gt:
-            continue
-        v = sorted(r[f"{k}_wer"] for r in per_file if r.get(f"{k}_wer") is not None)
-        if not v:
-            continue
-        mid = v[len(v) // 2] if len(v) % 2 else (v[len(v) // 2 - 1] + v[len(v) // 2]) / 2
-        zeros = sum(1 for x in v if x == 0)
-        rows += (f'<tr><td>{k}</td><td>{sum(v) / len(v):.3f}</td><td>{mid:.3f}</td>'
-                 f'<td>{zeros} of {len(v)}</td></tr>')
-    return rows
-
-
 def _mean(v):
     return sum(v) / len(v) if v else None
 
@@ -105,21 +87,24 @@ def repetition_stats(per_file: list, keys: list, max_len: int = 6) -> dict:
     return out
 
 
-def observations_html(agg: dict, per_file: list, keys: list, rep: dict) -> str:
-    """Observations, all computed from the per-file numbers so they stay in step with the data."""
+def observations_html(agg: dict, inc: list, allrows: list, keys: list, rep: dict) -> str:
+    """Observations. All numbers are computed from the per-file data, over the analysed files
+    (`inc`) unless stated otherwise, so the text stays in step with the data."""
     gt = agg.get("ground_truth_key", "gpt-4o-transcribe")
-    others = [k for k in keys if k != gt]  # systems with a WER against the reference
-    audio_min = sum(r["duration_s"] for r in per_file) / 60
+    others = [k for k in keys if k != gt]  # systems that have a WER against the reference
+    audio_min = sum(r["duration_s"] for r in inc) / 60
+    minw = agg.get("min_reference_words", 10)
+    excl = len(allrows) - len(inc)
 
     def total_min(k):
-        return sum(r.get(f"{k}_time_s", 0) for r in per_file) / 60
+        return sum(r.get(f"{k}_time_s", 0) for r in inc) / 60
 
     t_local, t_gt = total_min("local"), total_min(gt)
     slower = t_local / t_gt if t_gt else 0
-    over_rt = sum(1 for r in per_file if (r.get("local_rtf") or 0) > 1)
     rtf_ratio = (agg["local_rtf"]["mean"] / agg[f"{gt}_rtf"]["mean"]) if agg.get(f"{gt}_rtf") else 0
-    rtf_short = _median([r["local_rtf"] for r in per_file if r["duration_s"] < 60 and r.get("local_rtf")])
-    rtf_long = _median([r["local_rtf"] for r in per_file if r["duration_s"] >= 180 and r.get("local_rtf")])
+    over_rt = sum(1 for r in inc if (r.get("local_rtf") or 0) > 1)
+    rtf_short = _median([r["local_rtf"] for r in inc if r["duration_s"] < 60 and r.get("local_rtf")])
+    rtf_long = _median([r["local_rtf"] for r in inc if r["duration_s"] >= 180 and r.get("local_rtf")])
     cost = agg.get(f"{gt}_total_cost", 0)
     month = 30 * 60 * 0.006
 
@@ -127,25 +112,20 @@ def observations_html(agg: dict, per_file: list, keys: list, rep: dict) -> str:
     buckets = [("under 1 min", 0, 60), ("1 to 3 min", 60, 180), ("3 min and longer", 180, 10**9)]
     wer_rows = ""
     for label, lo, hi in buckets:
-        cells = ""
-        n_b = 0
+        cells, n_b = "", 0
         for k in others:
-            v = [r[f"{k}_wer"] for r in per_file
-                 if lo <= r["duration_s"] < hi and r.get(f"{k}_wer") is not None]
+            v = [r[f"{k}_wer"] for r in inc if lo <= r["duration_s"] < hi and r.get(f"{k}_wer") is not None]
             n_b = len(v)
             cells += f"<td>{_f(_mean(v))}</td><td>{_f(_median(v))}</td>"
         wer_rows += f"<tr><td>{label}</td><td>{n_b}</td>{cells}</tr>"
     wer_head = "".join(f"<th>{k} mean</th><th>{k} median</th>" for k in others)
 
-    # Nearly empty recordings: the reference has very few words, so one word is 10-100 % error
-    tiny = [r for r in per_file if r.get(f"{gt}_words", 0) < 10]
+    # What the excluded recordings would have done to the error rates
     ex_rows = ""
     for k in others:
-        all_v = [r[f"{k}_wer"] for r in per_file if r.get(f"{k}_wer") is not None]
-        rest = [r[f"{k}_wer"] for r in per_file
-                if r.get(f"{k}_wer") is not None and r.get(f"{gt}_words", 0) >= 10]
-        ex_rows += (f"<tr><td>{k}</td><td>{_f(_mean(all_v))}</td><td>{_f(_mean(rest))}</td>"
-                    f"<td>{_f(_median(rest))}</td></tr>")
+        all_v = [r[f"{k}_wer"] for r in allrows if r.get(f"{k}_wer") is not None]
+        kept_v = [r[f"{k}_wer"] for r in inc if r.get(f"{k}_wer") is not None]
+        ex_rows += (f"<tr><td>{k}</td><td>{_f(_mean(kept_v))}</td><td>{_f(_mean(all_v))}</td></tr>")
 
     rl = rep.get("local", {})
     other_rep = "; ".join(
@@ -156,26 +136,22 @@ def observations_html(agg: dict, per_file: list, keys: list, rep: dict) -> str:
   <ol>
     <li><b>Speed is the clear difference.</b> For {audio_min:.0f} minutes of audio, {gt} needed
         {t_gt:.1f} minutes in total, local {t_local:.0f} minutes: local was about {slower:.0f} times slower
-        (by mean RTF the gap is larger still). {gt} is also slightly faster than whisper-1.
-        Local was slower than real time (RTF above 1) on {over_rt} of {len(per_file)} files.</li>
+        (about {rtf_ratio:.0f} times by mean RTF). {gt} is also slightly faster than whisper-1.
+        Local was slower than real time (RTF above 1) on {over_rt} of {len(inc)} files.</li>
     <li><b>Local speed depends on file length.</b> Short files carry a fixed cost, because the model is loaded
         for every call (this is a likely explanation, not measured separately). Median local RTF falls from
         {_f(rtf_short, 2)} for files under a minute to {_f(rtf_long, 2)} for files of 3 minutes and more.
         The online services are fast at every length.</li>
     <li><b>Cost is a non-issue at this volume.</b> Both online models charge $0.006 per minute: ${cost:.2f} for
-        the whole corpus. 30 hours of voice notes per month would be about ${month:.2f}. Local costs nothing per
-        file, but occupied the server&rsquo;s processor for {t_local:.0f} minutes for this corpus.</li>
+        the whole corpus (all {len(allrows)} files were billed). 30 hours of voice notes per month would be about
+        ${month:.2f}. Local costs nothing per file, but occupied the server&rsquo;s processor for
+        {t_local:.0f} minutes for these files.</li>
     <li><b>Accuracy: close on average, but different by recording length.</b> Against the reference, local and
-        whisper-1 have similar mean error rates (see the table above). By recording length the picture differs;
+        whisper-1 have similar mean error rates (see the cards above). By recording length the picture differs;
         in this run, local was clearly further from the reference on the longest recordings:
       <table class="mini"><thead><tr><th>recording length</th><th>files</th>{wer_head}</tr></thead>
       <tbody>{wer_rows}</tbody></table>
       With only a handful of files per band this is an indication, not proof.</li>
-    <li><b>A few nearly empty recordings distort the error rates.</b> {len(tiny)} of the {len(per_file)} recordings
-        have fewer than 10 words in the reference (very little speech). One word more or less is then
-        a 10&ndash;100% error, and these files account for most WER values of 1.0 and above. Without them:
-      <table class="mini"><thead><tr><th>system</th><th>mean WER, all files</th><th>mean WER, without those files</th>
-      <th>median WER, without those files</th></tr></thead><tbody>{ex_rows}</tbody></table></li>
     <li><b>The local model sometimes repeats words or whole phrases.</b> A word or phrase directly followed
         by itself occurs {rl.get('events', 0)} times in the local transcripts, spread over {rl.get('files', 0)} files
         ({other_rep}). {rl.get('phrase', 0)} of the local cases are phrases of two or more words, and
@@ -185,60 +161,71 @@ def observations_html(agg: dict, per_file: list, keys: list, rep: dict) -> str:
         of Whisper-type models. Some repeats are real speech (stuttering, a list of names, &ldquo;like like&rdquo;), so not
         every case is an error. Every wrongly repeated passage adds insertions and thus raises the WER of the local
         model; the reference text has no such passages.</li>
+    <li><b>{excl} nearly empty recordings were left out.</b> Their reference has fewer than {minw} words (very
+        little speech). One word more or less is then a 10&ndash;100% error, which says nothing about quality, and
+        a very short clip can also distort the speed figures. They are excluded from all speed and error
+        statistics, stay in the table (greyed out) and in the cost total. Mean WER with and without them:
+      <table class="mini"><thead><tr><th>system</th><th>analysed files</th><th>if all files were counted</th></tr></thead>
+      <tbody>{ex_rows}</tbody></table></li>
   </ol>
 """
 
 
-def summary_html(agg: dict, per_file: list, keys: list, rep: dict) -> str:
+def summary_html(agg: dict, inc: list, allrows: list, keys: list, rep: dict) -> str:
     """Short summary shown above everything else. Numbers are computed from the data."""
     gt = agg.get("ground_truth_key", "gpt-4o-transcribe")
-    audio_min = sum(r["duration_s"] for r in per_file) / 60
-    t_local = sum(r.get("local_time_s", 0) for r in per_file) / 60
-    t_gt = sum(r.get(f"{gt}_time_s", 0) for r in per_file) / 60
+    audio_min = sum(r["duration_s"] for r in inc) / 60
+    t_local = sum(r.get("local_time_s", 0) for r in inc) / 60
+    t_gt = sum(r.get(f"{gt}_time_s", 0) for r in inc) / 60
     slower = t_local / t_gt if t_gt else 0
     cost = agg.get(f"{gt}_total_cost", 0)
     others = [k for k in keys if k != gt]
-    wer = {k: [r[f"{k}_wer"] for r in per_file if r.get(f"{k}_wer") is not None] for k in others}
+    wer = {k: [r[f"{k}_wer"] for r in inc if r.get(f"{k}_wer") is not None] for k in others}
     cells = "; ".join(f"{k}: mean {_f(_mean(v))}, median {_f(_median(v))}" for k, v in wer.items())
     rl = rep.get("local", {})
+    excl = len(allrows) - len(inc)
     return f"""
 <div class="card" style="margin-bottom:20px">
   <h3>Summary</h3>
-  <p style="margin-bottom:8px">Three speech-to-text systems transcribed the same {len(per_file)} voice recordings
-  ({audio_min:.0f} minutes). Speed, cost and agreement with a reference were compared.</p>
+  <p style="margin-bottom:8px">Three speech-to-text systems transcribed the same {len(allrows)} voice recordings.
+  {excl} nearly empty ones were left out of the statistics, so {len(inc)} files ({audio_min:.0f} minutes) were
+  compared on speed, cost and agreement with a reference.</p>
   <ul style="padding-left:20px;line-height:1.7">
     <li><b>Speed:</b> {gt} took {t_gt:.1f} minutes in total, the local model {t_local:.0f} minutes, about
         {slower:.0f} times longer. The local model ran on the processor only.</li>
     <li><b>Cost:</b> ${cost:.2f} for the whole corpus with either online model ($0.006 per minute); local costs nothing per file.</li>
-    <li><b>Agreement with the reference ({gt}), error rate over all files:</b> {cells}. Averages are close,
-        the online whisper-1 is better at the median. The two cards further down use a different file selection
-        and are not directly comparable (see the explanation).</li>
+    <li><b>Agreement with the reference ({gt}), error rate:</b> {cells}.
+        Averages are close, the online whisper-1 is better at the median.</li>
     <li><b>Where local is weaker:</b> long recordings (3 minutes and more) and repetitions: words or whole phrases
         are repeated, {rl.get('events', 0)} times in {rl.get('files', 0)} files, sometimes several times in a row.</li>
     <li><b>Caution:</b> the reference is itself a machine transcription, so the error rates show agreement, not
-        truth. A few nearly empty recordings distort the means, and only 44 files from one speaker were used.</li>
+        truth. Only {len(inc)} files from one speaker, one run on one server.</li>
   </ul>
 </div>
 """
 
 
-def about_html(agg: dict, per_file: list, keys: list, public: bool, rep: dict) -> str:
+def about_html(agg: dict, inc: list, allrows: list, keys: list, public: bool, rep: dict) -> str:
     gt = agg.get("ground_truth_key", "gpt-4o-transcribe")
-    api = [k for k in keys if k != "local"]
+    minw = agg.get("min_reference_words", 10)
+    excl = len(allrows) - len(inc)
+    total_min = sum(r["duration_s"] for r in allrows) / 60
+    inc_min = sum(r["duration_s"] for r in inc) / 60
     removed = ("<p><b>Privacy:</b> This public version contains numbers only. All transcripts and the "
                "recording names (which contained date and time) were removed. Files are numbered "
                "<i>Rec 01 &hellip; Rec "
-               f"{agg['total_files']:02d}</i>. The side-by-side transcript viewer of the full report is "
+               f"{len(allrows):02d}</i>. The side-by-side transcript viewer of the full report is "
                "not included.</p>") if public else ""
     return f"""
 <details class="card about" open>
   <summary>About this report &mdash; what was measured, how, and what the abbreviations mean</summary>
 
   <h3>What was done</h3>
-  <p>The same {agg['total_files']} voice recordings ({agg['total_duration_min']:.0f} minutes in total, natural
-  speech, mixed German and English, recorded on a phone) were transcribed by three speech-to-text systems.
-  Speed, cost and agreement between the systems were measured. The goal: is it worth paying for an online
-  service, or is a model that runs on the home server good and fast enough?</p>
+  <p>The same {len(allrows)} voice recordings ({total_min:.0f} minutes in total, natural speech, mixed German and
+  English, recorded on a phone) were transcribed by three speech-to-text systems. {excl} recordings with almost
+  no speech were left out of the speed and error statistics; the remaining {len(inc)} ({inc_min:.0f} minutes)
+  were compared. Speed, cost and agreement between the systems were measured. The goal: is it worth paying for an
+  online service, or is a model that runs on the home server good and fast enough?</p>
 
   <h3>The three systems</h3>
   <ul>
@@ -274,11 +261,14 @@ def about_html(agg: dict, per_file: list, keys: list, public: bool, rep: dict) -
         &szlig; as well as digits are kept.</li>
     <li><b>Counting:</b> the cleaned texts are split into words and aligned by the minimum number of changes
         (word-level edit distance, library <i>jiwer</i>). Each replaced, missing or extra word counts as one error,
-        no matter how small the difference is. WER = errors / words in the reference.</li>
+        no matter how small the difference is. WER = errors / words in the reference. If a system returns no text
+        for a recording whose reference has words, that counts as WER 1.0 (every word missing).</li>
+    <li><b>Which files count:</b> a recording whose reference has fewer than {minw} words is left out of all
+        speed and error statistics ({excl} files). One word is then a 10&ndash;100% error, which says nothing
+        about quality. These files stay in the table (greyed out) and in the cost total.</li>
     <li><b>Per file, then average:</b> the WER is calculated per recording, and mean, median and p95 are taken
-        over the recordings. Every file counts equally, so a 2-second clip weighs as much as a 7-minute
-        recording, and short clips can swing the mean strongly (this is why the median is often more
-        informative). A file is skipped for WER if one of the two texts is empty after cleaning.</li>
+        over the {len(inc)} analysed recordings. Every file counts equally, so a 2-minute recording weighs as much as
+        a 7-minute one (the median is often more informative than the mean).</li>
   </ol>
   <p><b>Ignored (does not count as an error):</b> upper/lower case, punctuation, line breaks and paragraph
   layout, hyphen or slash versus space.</p>
@@ -309,53 +299,38 @@ def about_html(agg: dict, per_file: list, keys: list, public: bool, rep: dict) -
     <dd>Average; the middle value (half of the files are better, half worse; less sensitive to outliers); and the
         value that 95% of the files stay below, i.e. the bad end.</dd>
     <dt>n</dt><dd>Number of files in a calculation.</dd>
-    <dt>Cost</dt><dd>Audio minutes &times; $0.006, in US dollars. Local costs nothing per file.</dd>
+    <dt>Cost</dt><dd>Audio minutes &times; $0.006, in US dollars, for all files. Local costs nothing per file.</dd>
     <dt>Time</dt><dd>Seconds for one file. <b>Duration</b> is the length of the recording.</dd>
+    <dt>Greyed-out row</dt><dd>A recording that was left out of the statistics because it has almost no speech.</dd>
     <dt>Rec 01 &hellip;</dt><dd>Anonymous number of a recording (in chronological order).</dd>
     <dt>CPU / GPU</dt><dd>Normal processor / graphics processor. Speech models run much faster on a GPU.</dd>
     <dt>API</dt><dd>Interface to an online service.</dd>
-    <dt>cross-WER</dt><dd>Column reserved for the agreement between local and an online system. It was not
-        calculated in this run and therefore shows &mdash;.</dd>
   </dl>
 
   <h3>Reading the charts and the table</h3>
   <ul>
     <li><b>Speed (scatter):</b> every dot is a file. The higher a system&rsquo;s dots sit, the longer it took
-        for the same duration.</li>
+        for the same duration. Charts show the analysed files only.</li>
     <li><b>RTF per file (bars):</b> the same in relative terms. Bars above 1 mean slower than real time.</li>
     <li><b>WER distribution:</b> how many files fall into each error band. Many files on the left (0&ndash;10%) is good.</li>
     <li><b>Table:</b> click a column header to sort. The filter box searches the file name. Colours: green &lt; 20%,
-        yellow &lt; 40%, red above.</li>
+        yellow &lt; 40%, red above. Greyed-out rows are the excluded recordings.</li>
   </ul>
 
-  <h3>How to read the results (and two caveats)</h3>
-  <ul>
-    <li><b>Speed:</b> the online services are far faster than local on this server. The local model usually needs
-        more than half the recording length, the online services a few percent of it.</li>
-    <li><b>Error rate, like for like (all files, computed for this page):</b>
-      <table class="mini"><thead><tr><th>system</th><th>mean WER</th><th>median WER</th><th>files with WER = 0</th></tr></thead>
-      <tbody>{like_for_like(per_file, keys, gt)}</tbody></table>
-      The two cards at the top show means that are <b>not</b> directly comparable: for the online
-      systems, files with a perfect score (0) were left out of the average, for local they were counted
-      (see the <i>n</i> in the card labels). On a like-for-like basis the two are about equal on average,
-      and the online model is better at the median.</li>
-    <li><b>Outliers:</b> the mean RTF of the local system is pulled up by a very short recording (under 2 seconds) whose
-        transcription took more than 20 seconds (probably start-up overhead). The median RTF is the better figure.</li>
-    <li><b>Limits:</b> one speaker, {agg['total_files']} files, one run, one server. The reference is itself a
-        machine transcription.</li>
-  </ul>
-  {observations_html(agg, per_file, keys, rep)}
+  {observations_html(agg, inc, allrows, keys, rep)}
   {removed}
 </details>
 """
 
 
 def build_report(metrics: dict, public: bool = False) -> str:
-    rep = repetition_stats(metrics["per_file"], ["local"] + metrics["aggregate"].get("backend_keys", []))
+    rep = repetition_stats([r for r in metrics["per_file"] if not r.get("excluded")],
+                           ["local"] + metrics["aggregate"].get("backend_keys", []))
     if public:
         metrics = sanitize(metrics)
     agg = metrics["aggregate"]
     per_file = metrics["per_file"]
+    inc = [r for r in per_file if not r.get("excluded")]   # analysed files
     backend_keys = agg.get("backend_keys", [])
     all_keys = ["local"] + backend_keys
     data_json = json.dumps(metrics, ensure_ascii=False)
@@ -372,7 +347,7 @@ def build_report(metrics: dict, public: bool = False) -> str:
         if agg.get(f"{k}_rtf"):
             summary_row1 += stat_card(agg[f"{k}_rtf"]["mean"], f"{k} mean RTF", k)
     total_cost = sum(agg.get(f"{k}_total_cost", 0) for k in backend_keys)
-    summary_row1 += stat_card(f"${total_cost:.4f}", "Total API cost", "")
+    summary_row1 += stat_card(f"${total_cost:.4f}", "Total API cost (both online models, all files)", "")
 
     summary_row2 = ""
     gt = agg.get("ground_truth_key", "gpt-4o-transcribe")
@@ -380,7 +355,7 @@ def build_report(metrics: dict, public: bool = False) -> str:
         summary_row2 += stat_card(agg["local_wer"]["mean"], f"Local WER vs {gt} (n={agg['local_wer']['n']})", "local")
     for k in backend_keys:
         if k != gt and agg.get(f"{k}_wer", {}).get("n"):
-            summary_row2 += stat_card(agg[f"{k}_wer"]["mean"], f"{k} WER vs {gt} (n={agg[f'{k}_wer']['n']}, perfect files excluded)", k)
+            summary_row2 += stat_card(agg[f"{k}_wer"]["mean"], f"{k} WER vs {gt} (n={agg[f'{k}_wer']['n']})", k)
 
     # Table header columns
     def th(label, idx):
@@ -388,7 +363,7 @@ def build_report(metrics: dict, public: bool = False) -> str:
 
     table_cols = ["File", "Duration", "Local time", "Local RTF", "Local WER"]
     for k in backend_keys:
-        table_cols += [f"{k} time", f"{k} RTF", f"{k} WER", f"{k} cross-WER"]
+        table_cols += [f"{k} time", f"{k} RTF", f"{k} WER"]
     table_cols.append("Cost")
     th_html = "".join(th(c, i) for i, c in enumerate(table_cols))
 
@@ -440,6 +415,7 @@ def build_report(metrics: dict, public: bool = False) -> str:
   tr:hover{{background:#1f2233}}
   tr.active{{background:#23273a}}
   .null{{color:var(--muted)}}
+  tr.excl{{opacity:.45}}
   .diff-panel{{display:none;margin-top:16px}}
   .diff-panel.visible{{display:block}}
   .diff-text{{font-size:.85rem;line-height:1.8}}
@@ -467,10 +443,10 @@ def build_report(metrics: dict, public: bool = False) -> str:
 <body>
 <div class="container">
   <h1>🎙 Whisper Benchmark</h1>
-  <h2>{agg['total_files']} recordings &nbsp;·&nbsp; {agg['total_duration_min']:.1f} min audio &nbsp;·&nbsp; backends: local + {', '.join(backend_keys)}</h2>
+  <h2>{agg['total_files']} recordings ({agg['analysed_files']} analysed) &nbsp;·&nbsp; {agg['total_duration_min']:.1f} min audio &nbsp;·&nbsp; backends: local + {', '.join(backend_keys)}</h2>
 
-  {summary_html(agg, per_file, all_keys, rep)}
-  {about_html(agg, per_file, all_keys, public, rep)}
+  {summary_html(agg, inc, per_file, all_keys, rep)}
+  {about_html(agg, inc, per_file, all_keys, public, rep)}
 
   <div class="grid g4" style="margin-bottom:16px">{summary_row1}</div>
   {"" if not summary_row2 else f'<div class="grid g{min(len(all_keys),4)}" style="margin-bottom:20px">{summary_row2}</div>'}
@@ -494,6 +470,7 @@ def build_report(metrics: dict, public: bool = False) -> str:
 <script>
 const DATA = {data_json};
 const pf = DATA.per_file;
+const pfa = pf.filter(r=>!r.excluded);   // analysed files: charts and statistics
 const agg = DATA.aggregate;
 const backendKeys = {js_backend_keys};
 const allKeys = {js_all_keys};
@@ -522,7 +499,7 @@ function rowCols(r) {{
     fmt(r.local_time_s,1,'s'), fmt(r.local_rtf,3), fmtWer(r.local_wer),
   ];
   for(const k of backendKeys) {{
-    cols.push(fmt(r[k+'_time_s'],1,'s'), fmt(r[k+'_rtf'],3), fmtWer(r[k+'_wer']), fmtWer(r[k+'_cross_wer']));
+    cols.push(fmt(r[k+'_time_s'],1,'s'), fmt(r[k+'_rtf'],3), fmtWer(r[k+'_wer']));
   }}
   const totalCost = backendKeys.reduce((s,k)=>s+(r[k+'_cost_usd']||0),0);
   cols.push(totalCost?'$'+totalCost.toFixed(4):'<span class="null">—</span>');
@@ -530,7 +507,7 @@ function rowCols(r) {{
 }}
 
 function buildRows(data) {{
-  return data.map((r,i)=>`<tr data-i="${{i}}" onclick="selectRow(this)">${{rowCols(r).map(c=>`<td>${{c}}</td>`).join('')}}</tr>`).join('');
+  return data.map((r,i)=>`<tr data-i="${{i}}" class="${{r.excluded?'excl':''}}" title="${{r.excluded?'Left out of the statistics: almost no speech in this recording':''}}" onclick="selectRow(this)">${{rowCols(r).map(c=>`<td>${{c}}</td>`).join('')}}</tr>`).join('');
 }}
 
 let filteredData = pf;
@@ -541,7 +518,7 @@ function filterTable() {{
 }}
 
 const sortKeys=['stem','duration_s','local_time_s','local_rtf','local_wer',
-  ...backendKeys.flatMap(k=>[k+'_time_s',k+'_rtf',k+'_wer',k+'_cross_wer']),
+  ...backendKeys.flatMap(k=>[k+'_time_s',k+'_rtf',k+'_wer']),
   backendKeys[0]+'_cost_usd'];
 
 function sortTable(col) {{
@@ -612,13 +589,13 @@ const chartOpts = {{
 }};
 
 // Speed scatter
-const withLocal = pf.filter(r=>r.local_time_s);
+const withLocal = pfa.filter(r=>r.local_time_s);
 new Chart(document.getElementById('speedChart'),{{
   type:'scatter',
   data:{{datasets:[
     {{label:'Local',data:withLocal.map(r=>{{return{{x:r.duration_s,y:r.local_time_s}}}}),backgroundColor:'#34d399aa',pointRadius:5}},
     ...backendKeys.map((k,i)=>{{
-      const d=pf.filter(r=>r[k+'_time_s']);
+      const d=pfa.filter(r=>r[k+'_time_s']);
       return{{label:k,data:d.map(r=>{{return{{x:r.duration_s,y:r[k+'_time_s']}}}}),backgroundColor:colorsLine[i+1]+'aa',pointRadius:5}};
     }})
   ]}},
@@ -629,7 +606,7 @@ new Chart(document.getElementById('speedChart'),{{
 }});
 
 // RTF bar
-const rtfData=pf.filter(r=>r.local_rtf||backendKeys.some(k=>r[k+'_rtf']));
+const rtfData=pfa.filter(r=>r.local_rtf||backendKeys.some(k=>r[k+'_rtf']));
 new Chart(document.getElementById('rtfChart'),{{
   type:'bar',
   data:{{
@@ -650,7 +627,7 @@ const werEl=document.getElementById('werChart');
 if(werEl){{
   const buckets=new Array(10).fill(0);
   const localH=[...buckets],apiHists=Object.fromEntries(backendKeys.map(k=>[k,[...buckets]]));
-  pf.forEach(r=>{{
+  pfa.forEach(r=>{{
     if(r.local_wer!=null) localH[Math.min(Math.floor(r.local_wer*10),9)]++;
     backendKeys.forEach(k=>{{ if(r[k+'_wer']!=null) apiHists[k][Math.min(Math.floor(r[k+'_wer']*10),9)]++; }});
   }});
