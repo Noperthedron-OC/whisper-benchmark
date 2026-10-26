@@ -150,3 +150,7 @@ notes/
 log/
   2026-09.md      — session notes
 ```
+
+## License
+
+[MIT](LICENSE) © 2026 Erich Weihs
